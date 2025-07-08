@@ -19,6 +19,7 @@ dependencies = [
     "tqdm>=4.67.1",
     "wandb>=0.19.7",
     "ipython>=9.4.0",
+    "ruff>=0.12.2",
 ]
 
 
@@ -45,7 +46,5 @@ line-length = 120
 "__init__.py" = ["E402", "F401", "F403", "E501"]
 
 [tool.ruff.lint]
-extend-select = ["UP"]
-ignore = [
-    "F722"
-]
+select = ["UP", "I", "F401", "F403"]
+ignore = ["F722"]

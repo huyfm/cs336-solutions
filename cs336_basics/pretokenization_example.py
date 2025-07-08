@@ -1,6 +1,7 @@
 import os
 from typing import BinaryIO
 
+
 def find_chunk_boundaries(
     file: BinaryIO, 
     desired_num_chunks: int, 
@@ -52,7 +53,7 @@ def find_chunk_boundaries(
 ## Usage
 with open(..., "rb") as f:
     boundaries = find_chunk_boundaries(
-        f, num_processes, "<|endoftext|>".encode("utf-8"))
+        f, num_processes, b"<|endoftext|>")
         
     # The following is a serial implementation, but you can parallelize this 
     # by sending each start/end pair to a set of processes.

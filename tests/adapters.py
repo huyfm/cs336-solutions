@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import os
-from typing import IO, Any, BinaryIO
 from collections.abc import Iterable
-from jaxtyping import Float, Int
+from typing import IO, Any, BinaryIO
 
 import numpy.typing as npt
 import torch
+from jaxtyping import Float, Int
 from torch import Tensor
 
-from cs336_basics.modules import Embedding, Linear
+from cs336_basics.modules import Embedding, Linear, RMSNorm
 
 
 def run_linear(
@@ -382,7 +382,9 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    m = RMSNorm(d_model, eps)
+    m.load_state_dict({"gain": weights})
+    return m(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:

@@ -1,6 +1,6 @@
 import torch
-from torch import nn, Tensor
-from einops import einsum, rearrange
+from einops import einsum, reduce
+from torch import Tensor, nn
 
 
 class Linear(nn.Module):
@@ -36,3 +36,21 @@ class Embedding(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self.emb_table[x]
+
+
+class RMSNorm(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        eps: float = 1e-5,
+        dtype: torch.dtype | None = None,
+        device: torch.device | None = None,
+    ):
+        super().__init__()
+        self.gain = nn.Parameter(torch.ones(d_model, dtype=dtype, device=device))
+        self.eps = eps
+
+    def forward(self, x: Tensor) -> Tensor:
+        mean_squared = reduce(x**2, "b t d_model -> b t 1", "mean")
+        rms = (mean_squared + self.eps) ** 0.5
+        return x / rms * self.gain
