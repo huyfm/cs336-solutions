@@ -54,3 +54,21 @@ class RMSNorm(nn.Module):
         mean_squared = reduce(x**2, "b t d_model -> b t 1", "mean")
         rms = (mean_squared + self.eps) ** 0.5
         return x / rms * self.gain
+
+
+class SwiGLUFeedFoward(nn.Module):
+    def __init__(self, d_model: int, d_ff: int):
+        super().__init__()
+        # first linear projection before SwiGLU.
+        self.l1 = Linear(d_model, d_ff)
+        # linear projection used inside SwiGLU.
+        self.l3 = Linear(d_model, d_ff)
+        # second lineare projection.
+        self.l2 = Linear(d_ff, d_model)
+
+    def forward(self, x: Tensor) -> Tensor:
+        y1 = self.l1(x)
+        y2 = self.l3(x)
+        silu_out = torch.sigmoid(y1) * y1
+        swiglu_out = silu_out * y2
+        return self.l2(swiglu_out)
