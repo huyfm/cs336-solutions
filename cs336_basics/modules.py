@@ -105,5 +105,13 @@ class RoPE(nn.Module):
         x1rot = cos_phi * x1 - sin_phi * x2
         x2rot = sin_phi * x1 + cos_phi * x2
 
-        xrot = rearrange([x1rot, x2rot], "b ... seq dpair -> ... seq (dpair b)")
+        xrot = rearrange([x1rot, x2rot], "b ... seq dpair -> ... seq (dpair b)")  # (... seq, d)
         return xrot
+
+
+def softmax(x: Tensor, dim: int) -> Tensor:
+    xmax = torch.max(x, dim=dim, keepdim=True).values
+    x = x - xmax  # for numerical reason
+    xexp = torch.exp(x)
+    prob = xexp / torch.sum(xexp, dim=dim, keepdim=True)
+    return prob
