@@ -9,7 +9,7 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from cs336_basics.modules import Embedding, Linear, RMSNorm, SwiGLUFeedFoward
+from cs336_basics.modules import FFN, Embedding, Linear, RMSNorm
 
 
 def run_linear(
@@ -31,7 +31,7 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
     m = Linear(d_in, d_out)
-    m.load_state_dict({"W": weights})
+    m.load_state_dict({"weight": weights})
     return m(in_features)
 
 
@@ -80,8 +80,9 @@ def run_swiglu(
     Returns:
         Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
     """
-    m = SwiGLUFeedFoward(d_model, d_ff)
-    m.load_state_dict({"l1.W": w1_weight, "l2.W": w2_weight, "l3.W": w3_weight})
+    m = FFN(d_model, d_ff)
+    # Layer l2 uses w3_weight, layer l3 uses w2_weight.
+    m.load_state_dict({"l1.weight": w1_weight, "l3.weight": w2_weight, "l2.weight": w3_weight})
     return m(in_features)
 
 

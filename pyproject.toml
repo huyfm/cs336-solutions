@@ -20,6 +20,9 @@ dependencies = [
     "wandb>=0.19.7",
     "ipython>=9.4.0",
     "ruff>=0.12.2",
+    "ipykernel>=6.29.5",
+    "pillow>=11.3.0",
+    "matplotlib>=3.10.3",
 ]
 
 
