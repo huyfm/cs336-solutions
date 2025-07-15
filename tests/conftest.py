@@ -12,8 +12,8 @@ _A = TypeVar("_A", np.ndarray, Tensor)
 
 def _canonicalize_array(arr: _A) -> np.ndarray:
     if isinstance(arr, Tensor):
-        arr = arr.detach().cpu().numpy()
-    return arr
+        arr = arr.detach().cpu().numpy()  # type: ignore
+    return arr  # type: ignore
 
 
 class NumpySnapshot:
