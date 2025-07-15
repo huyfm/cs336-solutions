@@ -2,7 +2,7 @@ import math
 
 import torch
 from einops import einsum, rearrange, reduce
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float, Int
 from torch import Tensor, nn
 
 
@@ -58,7 +58,7 @@ class RMSNorm(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         x_f32 = x.to(torch.float32)
         # Use f32 to avoid overflow when squaring.
-        mean_squared = reduce(x_f32**2, "b t d_model -> b t 1", "mean")
+        mean_squared = reduce(x_f32**2, "b seq d_model -> b seq 1", "mean")
         rms = torch.sqrt(mean_squared + self.eps)
         return x / rms * self.gain
 
@@ -115,3 +115,21 @@ def softmax(x: Tensor, dim: int) -> Tensor:
     xexp = torch.exp(x)
     prob = xexp / torch.sum(xexp, dim=dim, keepdim=True)
     return prob
+
+
+def scaled_dot_product_attention(
+    Q: Float[Tensor, "... seq_q d_k"],
+    K: Float[Tensor, "... seq_k d_k"],
+    V: Float[Tensor, "... seq_k d_v"],
+    mask: Bool[Tensor, " ... seq_q seq_k"] | None = None,
+) -> Float[Tensor, " ... seq_q d_v"]:
+    d_k = Q.size(-1)
+    attn_scores = einsum(Q, K, "... seq_q d_k, ... seq_k d_k -> ... seq_q seq_k") / math.sqrt(d_k)
+    # Replace false mask values with -inf.
+    if not mask is None:
+        attn_scores.masked_fill_(~mask, float("-inf"))
+
+    attn_weights = softmax(attn_scores, dim=-1)  # (..., seq_q, seq_k)
+    output = einsum(attn_weights, V, "... seq_q seq_k, ... seq_k d_v -> ... seq_q d_v")
+    return output
+    
