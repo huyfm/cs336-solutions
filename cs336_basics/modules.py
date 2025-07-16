@@ -18,6 +18,7 @@ class Linear(nn.Module):
         self.weight = nn.Parameter(
             torch.empty(out_features, in_features, dtype=dtype, device=device)
         )
+        # Use truncated He initialization.
         std = math.sqrt(2 / (in_features + out_features))
         nn.init.trunc_normal_(self.weight, mean=0, std=std, a=-3 * std, b=3 * std)
 
@@ -37,6 +38,7 @@ class Embedding(nn.Module):
         self.weight = nn.Parameter(
             torch.empty(num_embeddings, embedding_dim, dtype=dtype, device=device)
         )
+        # Use truncated standard normal distribution to initialize.
         nn.init.trunc_normal_(self.weight, mean=0, std=1, a=-3, b=3)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -212,8 +214,8 @@ class TransformerBlock(nn.Module):
         device: torch.device | None = None,
     ):
         super().__init__()
-        self.ln1 = RMSNorm(d_model, 1e-5, dtype, device)
         enabled_rope = True
+        self.ln1 = RMSNorm(d_model, 1e-5, dtype, device)
         self.attn = CausalMHA(d_model, num_heads, max_seq_len, enabled_rope, theta, dtype, device)
         self.ln2 = RMSNorm(d_model, 1e-5, dtype, device)
         self.ffn = FFN(d_model, d_ff, dtype, device)
@@ -240,12 +242,20 @@ class TransformerLM(nn.Module):
         device: torch.device | None = None,
     ):
         super().__init__()
+        # Embed token indices to a sequence of token embeddings.
         self.token_embd = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+
+        # Attention blocks that process the token embeddings
+        # and compute the predicted feature vectors.
         self.layers = nn.ModuleList(
             TransformerBlock(d_model, num_heads, d_ff, theta, ctx_len, dtype, device)
             for _ in range(num_layers)
         )
+
+        # Normalize attention output: due to using pre-norm blocks.
         self.ln_f = RMSNorm(d_model, 1e-5, dtype, device)
+
+        # Prediction LM head.
         self.lm_head = Linear(d_model, vocab_size, dtype, device)
 
     def forward(self, indices: Float[Tensor, "b seq"]) -> Float[Tensor, "b seq vocab"]:
