@@ -208,7 +208,7 @@ class TransformerBlock(nn.Module):
         d_model: int,
         num_heads: int,
         d_ff: int,
-        theta: float,
+        rope_theta: float,
         max_seq_len: int,
         dtype: torch.dtype | None = None,
         device: torch.device | None = None,
@@ -216,7 +216,9 @@ class TransformerBlock(nn.Module):
         super().__init__()
         enabled_rope = True
         self.ln1 = RMSNorm(d_model, 1e-5, dtype, device)
-        self.attn = CausalMHA(d_model, num_heads, max_seq_len, enabled_rope, theta, dtype, device)
+        self.attn = CausalMHA(
+            d_model, num_heads, max_seq_len, enabled_rope, rope_theta, dtype, device
+        )
         self.ln2 = RMSNorm(d_model, 1e-5, dtype, device)
         self.ffn = FFN(d_model, d_ff, dtype, device)
 
