@@ -64,11 +64,17 @@ class RMSNorm(nn.Module):
 
 
 class FFN(nn.Module):
-    def __init__(self, d_model: int, d_ff: int):
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int,
+        dtype: torch.dtype | None = None,
+        device: torch.device | None = None,
+    ):
         super().__init__()
-        self.l1 = Linear(d_model, d_ff)
-        self.l2 = Linear(d_model, d_ff)
-        self.l3 = Linear(d_ff, d_model)
+        self.l1 = Linear(d_model, d_ff, dtype, device)
+        self.l2 = Linear(d_model, d_ff, dtype, device)
+        self.l3 = Linear(d_ff, d_model, dtype, device)
 
     def forward(self, x: Tensor) -> Tensor:
         y1 = self.l1(x)
@@ -88,8 +94,9 @@ class RoPE(nn.Module):
         pos = torch.arange(max_seq_len)
         phi = einsum(pos, base_angle, "i, j -> i j")  # (maxseq, dpair)
 
-        self.register_buffer("sin_phi", torch.sin(phi).to(device))  # (maxseq, dpair)
-        self.register_buffer("cos_phi", torch.cos(phi).to(device))  # (maxseq, dpair)
+        # Both buffers of size (maxseq, dpair).
+        self.register_buffer("sin_phi", torch.sin(phi).to(device), persistent=False)
+        self.register_buffer("cos_phi", torch.cos(phi).to(device), persistent=False)
 
     def forward(
         self, x: Float[Tensor, "... seq d"], token_positions: Int[Tensor, "... seq"]
@@ -132,4 +139,53 @@ def scaled_dot_product_attention(
     attn_weights = softmax(attn_scores, dim=-1)  # (..., seq_q, seq_k)
     output = einsum(attn_weights, V, "... seq_q seq_k, ... seq_k d_v -> ... seq_q d_v")
     return output
-    
+
+
+class CausalMHA(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        max_seq_len: int,
+        enable_rope: bool,
+        theta: float | None = None,
+        dtype: torch.dtype | None = None,
+        device: torch.device | None = None,
+    ):
+        super().__init__()
+        self.h = num_heads
+        self.max_seq_len = max_seq_len
+        self.enable_rope = enable_rope
+        d_k = d_model // num_heads
+
+        self.qkv_proj = Linear(d_model, 3 * d_model, dtype, device)
+        self.out_proj = Linear(d_model, d_model, dtype, device)
+
+        if enable_rope:
+            if theta is None:
+                raise ValueError("Theta cannot be None if RoPE is enabled")
+            self.rope = RoPE(theta, d_k, max_seq_len, device)
+
+        mask = torch.tril(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device))
+        self.register_buffer("mask", mask, persistent=False)  # (maxseq, maxseq)
+
+    def forward(self, x: Float[Tensor, "b seq d_model"]) -> Float[Tensor, "b seq d_model"]:
+        seq_len = x.size(-2)
+        if seq_len > self.max_seq_len:
+            raise ValueError("Input sequence length > max_seq_len")
+
+        QKV = rearrange(self.qkv_proj(x), "b seq (d2 d_model) -> b seq d2 d_model", d2=3)
+        Q = rearrange(QKV[..., 0, :], "b seq (h d_k) -> b h seq d_k", h=self.h)
+        K = rearrange(QKV[..., 1, :], "b seq (h d_k) -> b h seq d_k", h=self.h)
+        V = rearrange(QKV[..., 2, :], "b seq (h d_k) -> b h seq d_k", h=self.h)
+
+        if self.enable_rope:
+            pos_ids = torch.arange(seq_len, device=x.device)
+            Q = self.rope(Q, pos_ids)
+            K = self.rope(K, pos_ids)
+
+        mask = self.mask[:seq_len, :seq_len]  # type: ignore
+        attn = scaled_dot_product_attention(Q, K, V, mask)  # (b, h, seq, d_k)
+        attn = rearrange(attn, "b h seq d_k -> b seq (h d_k)")  # (b, seq, d_model)
+
+        return self.out_proj(attn)

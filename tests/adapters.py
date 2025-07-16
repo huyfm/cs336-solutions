@@ -11,6 +11,7 @@ from torch import Tensor
 
 from cs336_basics.modules import (
     FFN,
+    CausalMHA,
     Embedding,
     Linear,
     RMSNorm,
@@ -146,7 +147,12 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    m = CausalMHA(d_model, num_heads, max_seq_len=in_features.size(-2), enable_rope=False)
+    m.load_state_dict({
+        "qkv_proj.weight": torch.concat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0),
+        "out_proj.weight": o_proj_weight,
+    })
+    return m(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -186,7 +192,12 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    m = CausalMHA(d_model, num_heads, max_seq_len, enable_rope=True, theta=theta)
+    m.load_state_dict({
+        "qkv_proj.weight": torch.concat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0),
+        "out_proj.weight": o_proj_weight,
+    })
+    return m(in_features)
 
 
 def run_rope(
