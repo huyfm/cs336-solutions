@@ -72,7 +72,9 @@ class FFN(nn.Module):
         device: torch.device | None = None,
     ):
         super().__init__()
+        # SwiGLU projection.
         self.fc1 = Linear(d_model, 2 * d_ff, dtype, device)
+        # projection back to the residual path.
         self.fc2 = Linear(d_ff, d_model, dtype, device)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -85,18 +87,24 @@ class FFN(nn.Module):
 
 class RoPE(nn.Module):
     def __init__(
-        self, theta: float, d_k: int, max_seq_len: int, device: torch.device | None = None
+        self,
+        theta: float,
+        d_k: int,
+        max_seq_len: int,
+        dtype: torch.dtype | None = None,
+        device: torch.device | None = None,
     ):
         super().__init__()
         self.max_seq_len = max_seq_len
 
+        # Compute rotating angles phi.
         base_angle = theta ** (-torch.arange(0, d_k, 2) / d_k)
         pos = torch.arange(max_seq_len)
         phi = einsum(pos, base_angle, "i, j -> i j")  # (maxseq, dpair)
 
         # Both buffers of size (maxseq, dpair).
-        self.register_buffer("sin_phi", torch.sin(phi).to(device), persistent=False)
-        self.register_buffer("cos_phi", torch.cos(phi).to(device), persistent=False)
+        self.register_buffer("sin_phi", torch.sin(phi).to(device, dtype), persistent=False)
+        self.register_buffer("cos_phi", torch.cos(phi).to(device, dtype), persistent=False)
 
     def forward(
         self, x: Float[Tensor, "... seq d"], token_positions: Int[Tensor, "... seq"]
@@ -107,6 +115,7 @@ class RoPE(nn.Module):
         xpair = rearrange(x, "... seq (d1 d2) -> ... seq d1 d2", d2=2)
         x1, x2 = xpair[..., 0], xpair[..., 1]  # (..., seq, dpair)
 
+        # Rotate each pair of elements in the input vectors by phi.
         sin_phi = self.sin_phi[token_positions]  # type: ignore # (..., seq, dpair)
         cos_phi = self.cos_phi[token_positions]  # type: ignore # (..., seq, dpair)
         x1rot = cos_phi * x1 - sin_phi * x2
@@ -164,7 +173,7 @@ class CausalMHA(nn.Module):
         if enable_rope:
             if theta is None:
                 raise ValueError("Theta cannot be None if RoPE is enabled")
-            self.rope = RoPE(theta, d_k, max_seq_len, device)
+            self.rope = RoPE(theta, d_k, max_seq_len, dtype, device)
 
         mask = torch.tril(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device))
         self.register_buffer("mask", mask, persistent=False)  # (maxseq, maxseq)
