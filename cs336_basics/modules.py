@@ -72,15 +72,15 @@ class FFN(nn.Module):
         device: torch.device | None = None,
     ):
         super().__init__()
-        self.l1 = Linear(d_model, d_ff, dtype, device)
-        self.l2 = Linear(d_model, d_ff, dtype, device)
-        self.l3 = Linear(d_ff, d_model, dtype, device)
+        self.fc1 = Linear(d_model, 2 * d_ff, dtype, device)
+        self.fc2 = Linear(d_ff, d_model, dtype, device)
 
     def forward(self, x: Tensor) -> Tensor:
-        y1 = self.l1(x)
-        y2 = self.l2(x)
-        swiGLU_x = torch.sigmoid(y1) * y1 * y2
-        return self.l3(swiGLU_x)
+        y = rearrange(self.fc1(x), "... (d2 d_ff) -> ... d2 d_ff", d2=2)
+        y1 = y[..., 0, :]
+        y2 = y[..., 1, :]
+        swiglu_x = torch.sigmoid(y1) * y1 * y2
+        return self.fc2(swiglu_x)
 
 
 class RoPE(nn.Module):
@@ -189,3 +189,29 @@ class CausalMHA(nn.Module):
         attn = rearrange(attn, "b h seq d_k -> b seq (h d_k)")  # (b, seq, d_model)
 
         return self.out_proj(attn)
+
+
+class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        theta: int,
+        max_seq_len: int,
+        dtype: torch.dtype | None = None,
+        device: torch.device | None = None,
+    ):
+        super().__init__()
+        self.rmsn1 = RMSNorm(d_model, 1e-5, dtype, device)
+        self.rmsn2 = RMSNorm(d_model, 1e-5, dtype, device)
+        enabled_rope = True
+        self.attn = CausalMHA(d_model, num_heads, max_seq_len, enabled_rope, theta, dtype, device)
+        self.ffn = FFN(d_model, d_ff, dtype, device)
+
+    def forward(self, x: Float[Tensor, "b seq d_model"]) -> Float[Tensor, "b seq d_model"]:
+        xnorm = self.rmsn1(x)
+        x = x + self.attn(xnorm)
+        xnorm = self.rmsn2(x)
+        x = x + self.ffn(xnorm)
+        return x

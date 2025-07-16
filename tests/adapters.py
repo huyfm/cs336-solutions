@@ -90,8 +90,10 @@ def run_swiglu(
         Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
     """
     m = FFN(d_model, d_ff)
-    # Layer l2 uses w3_weight, layer l3 uses w2_weight.
-    m.load_state_dict({"l1.weight": w1_weight, "l3.weight": w2_weight, "l2.weight": w3_weight})
+    m.load_state_dict({
+        "fc1.weight": torch.concat([w1_weight, w3_weight], dim=0), 
+        "fc2.weight": w2_weight
+    })
     return m(in_features)
 
 
