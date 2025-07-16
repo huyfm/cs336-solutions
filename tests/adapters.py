@@ -308,8 +308,8 @@ def run_transformer_block(
 
     m = TransformerBlock(d_model, num_heads, d_ff, theta, max_seq_len)
     m.load_state_dict({
-        "rmsn1.gain": weights["ln1.weight"],
-        "rmsn2.gain": weights["ln2.weight"],
+        "ln1.gain": weights["ln1.weight"],
+        "ln2.gain": weights["ln2.weight"],
         "attn.qkv_proj.weight": attn_qkv_proj_weight,
         "attn.out_proj.weight": weights["attn.output_proj.weight"],
         "ffn.fc1.weight": ffn_fc1_weight,

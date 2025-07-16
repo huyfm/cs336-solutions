@@ -203,15 +203,41 @@ class TransformerBlock(nn.Module):
         device: torch.device | None = None,
     ):
         super().__init__()
-        self.rmsn1 = RMSNorm(d_model, 1e-5, dtype, device)
-        self.rmsn2 = RMSNorm(d_model, 1e-5, dtype, device)
+        self.ln1 = RMSNorm(d_model, 1e-5, dtype, device)
+        self.ln2 = RMSNorm(d_model, 1e-5, dtype, device)
         enabled_rope = True
         self.attn = CausalMHA(d_model, num_heads, max_seq_len, enabled_rope, theta, dtype, device)
         self.ffn = FFN(d_model, d_ff, dtype, device)
 
     def forward(self, x: Float[Tensor, "b seq d_model"]) -> Float[Tensor, "b seq d_model"]:
-        xnorm = self.rmsn1(x)
+        xnorm = self.ln1(x)
         x = x + self.attn(xnorm)
-        xnorm = self.rmsn2(x)
+        xnorm = self.ln2(x)
         x = x + self.ffn(xnorm)
         return x
+
+
+class TransformerLM(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        ctx_len: int,
+        num_layers: int,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        theta: float,
+        dtype: torch.dtype | None = None,
+        device: torch.device | None = None,
+    ):
+        self.emb = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+        self.blocks = nn.ModuleList(
+            TransformerBlock(d_model, num_heads, d_ff, theta, ctx_len, dtype, device)
+            for _ in range(num_layers)
+        )
+        self.ln_f = RMSNorm(d_model, 1e-5, dtype, device)
+        self.lm_head = Linear(d_model, vocab_size, dtype, device)
+
+    def forward(self, x: Float[Tensor, "b seq"]):
+        pass
+
