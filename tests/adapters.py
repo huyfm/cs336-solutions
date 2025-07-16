@@ -309,8 +309,8 @@ def run_transformer_block(
 
     m = TransformerBlock(d_model, num_heads, d_ff, theta, max_seq_len)
     m.load_state_dict({
-        "ln1.gain": weights["ln1.weight"],
-        "ln2.gain": weights["ln2.weight"],
+        "ln1.weight": weights["ln1.weight"],
+        "ln2.weight": weights["ln2.weight"],
         "attn.qkv_proj.weight": attn_qkv_proj_weight,
         "attn.out_proj.weight": weights["attn.output_proj.weight"],
         "ffn.fc1.weight": ffn_fc1_weight,
@@ -399,9 +399,42 @@ def run_transformer_lm(
         next-word distribution for each token.
     """
     m = TransformerLM(vocab_size, context_length, num_layers, d_model, num_heads, d_ff, rope_theta)
-    m.load_state_dict({
-        "token_emb."
-    })
+    state_dict = {
+        "token_embd.weight": weights["token_embeddings.weight"],
+        "ln_f.weight": weights["ln_final.weight"],
+        "lm_head.weight": weights["lm_head.weight"]
+    }
+
+    for i in range(num_layers):
+        pre = f"layers.{i}."
+        cur_attn_qkv_proj_weight = torch.cat(
+            [
+                weights[pre + "attn.q_proj.weight"],
+                weights[pre + "attn.k_proj.weight"],
+                weights[pre + "attn.v_proj.weight"],
+            ],
+            dim=0,
+        )
+        cur_attn_ffn_fc1_weight = torch.cat(
+            [
+                weights[pre + "ffn.w1.weight"],
+                weights[pre + "ffn.w3.weight"],
+            ],
+            dim=0,
+        )
+
+        cur_layer_weights = {
+            pre + "ln1.weight": weights[pre + "ln1.weight"],
+            pre + "ln2.weight": weights[pre + "ln2.weight"],
+            pre + "attn.qkv_proj.weight": cur_attn_qkv_proj_weight,
+            pre + "attn.out_proj.weight": weights[pre + "attn.output_proj.weight"],
+            pre + "ffn.fc1.weight": cur_attn_ffn_fc1_weight,
+            pre + "ffn.fc2.weight": weights[pre + "ffn.w2.weight"],
+        }
+        state_dict.update(cur_layer_weights)
+
+    m.load_state_dict(state_dict)
+    return m(in_indices)
 
 
 def run_rmsnorm(
@@ -425,7 +458,7 @@ def run_rmsnorm(
         RMSNorm of the `in_features`.
     """
     m = RMSNorm(d_model, eps)
-    m.load_state_dict({"gain": weights})
+    m.load_state_dict({"weight": weights})
     return m(in_features)
 
 

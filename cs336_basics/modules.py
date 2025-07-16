@@ -52,7 +52,7 @@ class RMSNorm(nn.Module):
         device: torch.device | None = None,
     ):
         super().__init__()
-        self.gain = nn.Parameter(torch.ones(d_model, dtype=dtype, device=device))
+        self.weight = nn.Parameter(torch.ones(d_model, dtype=dtype, device=device))
         self.eps = eps
 
     def forward(self, x: Tensor) -> Tensor:
@@ -60,7 +60,7 @@ class RMSNorm(nn.Module):
         # Use f32 to avoid overflow when squaring.
         mean_squared = reduce(x_f32**2, "b seq d_model -> b seq 1", "mean")
         rms = torch.sqrt(mean_squared + self.eps)
-        return x / rms * self.gain
+        return x / rms * self.weight
 
 
 class FFN(nn.Module):
@@ -204,9 +204,9 @@ class TransformerBlock(nn.Module):
     ):
         super().__init__()
         self.ln1 = RMSNorm(d_model, 1e-5, dtype, device)
-        self.ln2 = RMSNorm(d_model, 1e-5, dtype, device)
         enabled_rope = True
         self.attn = CausalMHA(d_model, num_heads, max_seq_len, enabled_rope, theta, dtype, device)
+        self.ln2 = RMSNorm(d_model, 1e-5, dtype, device)
         self.ffn = FFN(d_model, d_ff, dtype, device)
 
     def forward(self, x: Float[Tensor, "b seq d_model"]) -> Float[Tensor, "b seq d_model"]:
@@ -230,18 +230,19 @@ class TransformerLM(nn.Module):
         dtype: torch.dtype | None = None,
         device: torch.device | None = None,
     ):
-        self.token_emb = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
-        self.blocks = nn.ModuleList(
+        super().__init__()
+        self.token_embd = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+        self.layers = nn.ModuleList(
             TransformerBlock(d_model, num_heads, d_ff, theta, ctx_len, dtype, device)
             for _ in range(num_layers)
         )
         self.ln_f = RMSNorm(d_model, 1e-5, dtype, device)
         self.lm_head = Linear(d_model, vocab_size, dtype, device)
 
-    def forward(self, x: Float[Tensor, "b seq"]) -> Float[Tensor, "b seq vocab"]:
-        xemb = self.token_emb(x)  # (b, seq, d_model)
-        for m in self.blocks():
-            xemb = m(xemb)  # (b, seq, d_model)
-        logit = self.lm_head(self.ln_f(xemb))  # (b, seq, vocab)
+    def forward(self, indices: Float[Tensor, "b seq"]) -> Float[Tensor, "b seq vocab"]:
+        x = self.token_embd(indices)  # (b, seq, d_model)
+        for l in self.layers:
+            x = l(x)  # (b, seq, d_model)
+        logit = self.lm_head(self.ln_f(x))  # (b, seq, vocab)
         return logit
     
