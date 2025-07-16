@@ -197,7 +197,7 @@ class TransformerBlock(nn.Module):
         d_model: int,
         num_heads: int,
         d_ff: int,
-        theta: int,
+        theta: float,
         max_seq_len: int,
         dtype: torch.dtype | None = None,
         device: torch.device | None = None,

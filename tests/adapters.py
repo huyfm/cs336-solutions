@@ -16,6 +16,7 @@ from cs336_basics.modules import (
     Linear,
     RMSNorm,
     RoPE,
+    TransformerBlock,
     scaled_dot_product_attention,
     softmax,
 )
@@ -295,7 +296,26 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    attn_qkv_proj_weight = torch.cat(
+        [
+            weights["attn.q_proj.weight"],
+            weights["attn.k_proj.weight"],
+            weights["attn.v_proj.weight"],
+        ],
+        dim=0,
+    )
+    ffn_fc1_weight = torch.cat([weights["ffn.w1.weight"], weights["ffn.w3.weight"]], dim=0)
+
+    m = TransformerBlock(d_model, num_heads, d_ff, theta, max_seq_len)
+    m.load_state_dict({
+        "rmsn1.gain": weights["ln1.weight"],
+        "rmsn2.gain": weights["ln2.weight"],
+        "attn.qkv_proj.weight": attn_qkv_proj_weight,
+        "attn.out_proj.weight": weights["attn.output_proj.weight"],
+        "ffn.fc1.weight": ffn_fc1_weight,
+        "ffn.fc2.weight": weights["ffn.w2.weight"],
+    })
+    return m(in_features)
 
 
 def run_transformer_lm(
