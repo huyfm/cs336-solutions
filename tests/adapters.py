@@ -17,6 +17,7 @@ from cs336_basics.modules import (
     RMSNorm,
     RoPE,
     TransformerBlock,
+    TransformerLM,
     scaled_dot_product_attention,
     softmax,
 )
@@ -64,7 +65,7 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
     m = Embedding(vocab_size, d_model)
-    m.load_state_dict({"emb_table": weights})
+    m.load_state_dict({"weight": weights})
     return m(token_ids)
 
 
@@ -397,7 +398,10 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    m = TransformerLM(vocab_size, context_length, num_layers, d_model, num_heads, d_ff, rope_theta)
+    m.load_state_dict({
+        "token_emb."
+    })
 
 
 def run_rmsnorm(

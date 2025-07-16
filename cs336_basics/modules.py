@@ -34,13 +34,13 @@ class Embedding(nn.Module):
         device: torch.device | None = None,
     ):
         super().__init__()
-        self.emb_table = nn.Parameter(
+        self.weight = nn.Parameter(
             torch.empty(num_embeddings, embedding_dim, dtype=dtype, device=device)
         )
-        nn.init.trunc_normal_(self.emb_table, mean=0, std=1, a=-3, b=3)
+        nn.init.trunc_normal_(self.weight, mean=0, std=1, a=-3, b=3)
 
     def forward(self, x: Tensor) -> Tensor:
-        return self.emb_table[x]
+        return self.weight[x]
 
 
 class RMSNorm(nn.Module):
@@ -230,7 +230,7 @@ class TransformerLM(nn.Module):
         dtype: torch.dtype | None = None,
         device: torch.device | None = None,
     ):
-        self.emb = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+        self.token_emb = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
         self.blocks = nn.ModuleList(
             TransformerBlock(d_model, num_heads, d_ff, theta, ctx_len, dtype, device)
             for _ in range(num_layers)
@@ -238,6 +238,10 @@ class TransformerLM(nn.Module):
         self.ln_f = RMSNorm(d_model, 1e-5, dtype, device)
         self.lm_head = Linear(d_model, vocab_size, dtype, device)
 
-    def forward(self, x: Float[Tensor, "b seq"]):
-        pass
-
+    def forward(self, x: Float[Tensor, "b seq"]) -> Float[Tensor, "b seq vocab"]:
+        xemb = self.token_emb(x)  # (b, seq, d_model)
+        for m in self.blocks():
+            xemb = m(xemb)  # (b, seq, d_model)
+        logit = self.lm_head(self.ln_f(xemb))  # (b, seq, vocab)
+        return logit
+    
