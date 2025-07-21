@@ -1,9 +1,11 @@
 import math
+from collections.abc import Callable
 
 import torch
 from einops import einsum, rearrange, reduce
 from jaxtyping import Bool, Float, Int
 from torch import Tensor, nn
+from torch.optim.optimizer import ParamsT
 
 
 class Linear(nn.Module):
@@ -275,8 +277,64 @@ def cross_entropy(
     x = rearrange(x, "... batch dim -> (... batch) dim")  # (b, dim)
     xmax = reduce(x, "b dim -> b 1", "max")
     logsumexp = (x - xmax).exp().sum(dim=-1).log()  # (b,)
-    xtarget = x[torch.arange(x.size(0)), targets]   # (b,)
-    xmax = xmax.view(-1) # (b,)
+    xtarget = x[torch.arange(x.size(0)), targets]  # (b,)
+    xmax = xmax.view(-1)  # (b,)
 
     out = (xmax + logsumexp - xtarget).mean()
     return out
+
+
+class AdamW(torch.optim.Optimizer):
+    def __init__(
+        self, params: ParamsT, lr: int, betas: tuple[int, int], eps: float, weight_decay: float
+    ):
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+        }
+        super().__init__(params, defaults)
+
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:  # type: ignore
+        for group in self.param_groups:
+            lr = group["lr"]
+            beta1, beta2 = group["betas"]
+            eps = group["eps"]
+            weight_decay = group["weight_decay"]
+
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+
+                state = self.state[p]
+                # Initialize param state if not exist.
+                if len(state) == 0:
+                    state["t"] = 0  # current timestep
+                    state["m"] = torch.zeros_like(p)  # first moment
+                    state["v"] = torch.zeros_like(p)  # second moment
+
+                # Advance timestep.
+                state["t"] += 1
+
+                # Update moment running averages using in-place ops.
+                m, v = state["m"], state["v"]
+                m.mul_(beta1).add_(p.grad, alpha=1 - beta1)
+                v.mul_(beta2).addcmul_(p.grad, p.grad, value=1 - beta2)
+
+                # Fuse bias corrections into current learning rate.
+                t = state["t"]
+                lr_t = lr * math.sqrt(1 - beta2**t) / (1 - beta1**t)
+
+                # Apply weight decay.
+                p.data.mul_(1 - lr * weight_decay)
+
+                # Apply Adam update.
+                # "update" tensor can be optimized away.
+                update = m / (v.sqrt() + eps)
+                p.data.add_(update, alpha=-lr_t)
+
+        # Return to conform with Optimizer's default method.
+        # Actually no ops here.
+        loss = None if closure is None else closure()
+        return loss
