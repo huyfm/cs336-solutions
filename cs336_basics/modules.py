@@ -266,4 +266,17 @@ class TransformerLM(nn.Module):
             x = l(x)  # (b, seq, d_model)
         logit = self.lm_head(self.ln_f(x))  # (b, seq, vocab)
         return logit
-    
+
+
+def cross_entropy(
+    x: Float[Tensor, "... batch dim"], targets: Int[Tensor, "... batch"]
+) -> Float[Tensor, ""]:
+    # b = total batch dimension.
+    x = rearrange(x, "... batch dim -> (... batch) dim")  # (b, dim)
+    xmax = reduce(x, "b dim -> b 1", "max")
+    logsumexp = (x - xmax).exp().sum(dim=-1).log()  # (b,)
+    xtarget = x[torch.arange(x.size(0)), targets]   # (b,)
+    xmax = xmax.view(-1) # (b,)
+
+    out = (xmax + logsumexp - xtarget).mean()
+    return out

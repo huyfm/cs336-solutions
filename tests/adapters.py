@@ -18,6 +18,7 @@ from cs336_basics.modules import (
     RoPE,
     TransformerBlock,
     TransformerLM,
+    cross_entropy,
     scaled_dot_product_attention,
     softmax,
 )
@@ -528,7 +529,7 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    return cross_entropy(inputs, targets)
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
