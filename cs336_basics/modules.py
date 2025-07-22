@@ -330,9 +330,10 @@ class AdamW(torch.optim.Optimizer):
                 p.data.mul_(1 - lr * weight_decay)
 
                 # Apply Adam update.
-                # "update" tensor can be optimized away.
-                update = m / (v.sqrt() + eps)
-                p.data.add_(update, alpha=-lr_t)
+                # "denom" tensor can be optimized away if we write
+                # a fused kernel that does all computation on the fly.
+                denom = v.sqrt().add_(eps)
+                p.data.addcdiv_(m, denom, value=-lr_t)
 
         # Return to conform with Optimizer's default method.
         # Actually no ops here.
