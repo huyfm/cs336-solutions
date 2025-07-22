@@ -17,9 +17,7 @@ class Linear(nn.Module):
         device: torch.device | None = None,
     ):
         super().__init__()
-        self.weight = nn.Parameter(
-            torch.empty(out_features, in_features, dtype=dtype, device=device)
-        )
+        self.weight = nn.Parameter(torch.empty(out_features, in_features, dtype=dtype, device=device))
         # Use truncated He initialization.
         std = math.sqrt(2 / (in_features + out_features))
         nn.init.trunc_normal_(self.weight, mean=0, std=std, a=-3 * std, b=3 * std)
@@ -37,9 +35,7 @@ class Embedding(nn.Module):
         device: torch.device | None = None,
     ):
         super().__init__()
-        self.weight = nn.Parameter(
-            torch.empty(num_embeddings, embedding_dim, dtype=dtype, device=device)
-        )
+        self.weight = nn.Parameter(torch.empty(num_embeddings, embedding_dim, dtype=dtype, device=device))
         # Use truncated standard normal distribution to initialize.
         nn.init.trunc_normal_(self.weight, mean=0, std=1, a=-3, b=3)
 
@@ -218,9 +214,7 @@ class TransformerBlock(nn.Module):
         super().__init__()
         enabled_rope = True
         self.ln1 = RMSNorm(d_model, 1e-5, dtype, device)
-        self.attn = CausalMHA(
-            d_model, num_heads, max_seq_len, enabled_rope, rope_theta, dtype, device
-        )
+        self.attn = CausalMHA(d_model, num_heads, max_seq_len, enabled_rope, rope_theta, dtype, device)
         self.ln2 = RMSNorm(d_model, 1e-5, dtype, device)
         self.ffn = FFN(d_model, d_ff, dtype, device)
 
@@ -241,7 +235,7 @@ class TransformerLM(nn.Module):
         d_model: int,
         num_heads: int,
         d_ff: int,
-        theta: float,
+        rope_theta: float,
         dtype: torch.dtype | None = None,
         device: torch.device | None = None,
     ):
@@ -252,8 +246,7 @@ class TransformerLM(nn.Module):
         # Attention blocks that process the token embeddings
         # and compute the predicted feature vectors.
         self.layers = nn.ModuleList(
-            TransformerBlock(d_model, num_heads, d_ff, theta, ctx_len, dtype, device)
-            for _ in range(num_layers)
+            TransformerBlock(d_model, num_heads, d_ff, rope_theta, ctx_len, dtype, device) for _ in range(num_layers)
         )
 
         # Normalize attention output: due to using pre-norm blocks.
@@ -270,9 +263,7 @@ class TransformerLM(nn.Module):
         return logit
 
 
-def cross_entropy(
-    x: Float[Tensor, "... batch dim"], targets: Int[Tensor, "... batch"]
-) -> Float[Tensor, ""]:
+def cross_entropy(x: Float[Tensor, "... batch dim"], targets: Int[Tensor, "... batch"]) -> Float[Tensor, ""]:
     # b = total batch dimension.
     x = rearrange(x, "... batch dim -> (... batch) dim")  # (b, dim)
     xmax = reduce(x, "b dim -> b 1", "max")
@@ -285,9 +276,7 @@ def cross_entropy(
 
 
 class AdamW(torch.optim.Optimizer):
-    def __init__(
-        self, params: ParamsT, lr: int, betas: tuple[int, int], eps: float, weight_decay: float
-    ):
+    def __init__(self, params: ParamsT, lr: int, betas: tuple[int, int], eps: float, weight_decay: float):
         defaults = {
             "lr": lr,
             "betas": betas,

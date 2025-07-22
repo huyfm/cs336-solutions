@@ -4,9 +4,9 @@ from pydantic import BaseModel
 class ModelConfig(BaseModel):
     vocab_size: int
     num_layers: int
-    num_heads: int
     ctx_len: int
     d_model: int
+    num_heads: int
     d_ff: int
     rope_theta: float = 1e5
 
