@@ -24,11 +24,14 @@ def num_params(c: LLMConfig):
 
 
 def num_flops(c: LLMConfig):
-    batch = c.ctx_len
+    ctx = c.ctx_len
+    dm = c.d_model
+    nl = c.num_layers
+    vocab = c.vocab_size
 
-    attn = (7 + 2 / c.num_heads) * batch * c.d_model**2 * c.num_layers
-    ffwd = 20 * batch * c.d_model**2 * c.num_layers
-    pred = batch * c.d_model * c.vocab_size
+    attn = (8 * ctx * dm**2 + 4 * ctx**2 * dm) * nl
+    ffwd = 24 * ctx * dm**2 * nl
+    pred = 2 * ctx * dm * vocab
     total = attn + ffwd + pred
 
     print(f"Attn   : {attn / total * 100:2.0f} %")
@@ -59,9 +62,15 @@ if __name__ == "__main__":
             d_model=1600,
             num_heads=25,
         ),
+        "xl2": LLMConfig(
+            num_layers=48,
+            d_model=1600,
+            num_heads=25,
+            ctx_len=16384,
+        ),
     }
 
-    for size in ["s", "m", "l", "xl"]:
+    for size in ["s", "m", "l", "xl", "xl2"]:
         conf = configs[size]
         print("Model size", size)
         num_params(conf)
