@@ -1,5 +1,5 @@
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 import torch
 from einops import einsum, rearrange, reduce
@@ -340,3 +340,24 @@ def cosine_lr(t: int, lr_min: float, lr_max: float, warmup_iters: int, anneal_it
     # Cosine annealing.
     phi = (t - warmup_iters) / (anneal_iters - warmup_iters) * math.pi
     return lr_min + 0.5 * (1 + math.cos(phi)) * (lr_max - lr_min)
+
+
+def gradient_clipping(params: Iterable[Tensor], max_l2_norm: float) -> None:
+    try:
+        device = iter(params).__next__().device
+    except StopIteration:
+        return
+
+    squared_norm = torch.tensor(0.0, device=device)
+    for p in params:
+        if p.grad is None:
+            continue
+        squared_norm += p.grad.pow(2).sum()
+    norm = squared_norm.sqrt()
+
+    if norm > max_l2_norm:
+        scale = max_l2_norm / (norm + 1e-6)
+        for p in params:
+            if p.grad is None:
+                continue
+            p.grad.mul_(scale)
