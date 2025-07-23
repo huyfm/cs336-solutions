@@ -328,3 +328,15 @@ class AdamW(torch.optim.Optimizer):
         # Actually no ops here.
         loss = None if closure is None else closure()
         return loss
+
+
+def cosine_lr(t: int, lr_min: float, lr_max: float, warmup_iters: int, anneal_iters: int) -> float:
+    # Linear warmup.
+    if t < warmup_iters:
+        return t / warmup_iters * lr_max
+    # Post-annealing.
+    if t > anneal_iters:
+        return lr_min
+    # Cosine annealing.
+    phi = (t - warmup_iters) / (anneal_iters - warmup_iters) * math.pi
+    return lr_min + 0.5 * (1 + math.cos(phi)) * (lr_max - lr_min)
