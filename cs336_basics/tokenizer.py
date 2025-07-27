@@ -3,10 +3,6 @@ from collections import Counter
 
 REGEX_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
-text = """low low low low low
-lower lower widest widest widest
-newest newest newest newest newest newest"""
-
 BytePair = tuple[bytes, bytes]
 
 
@@ -25,12 +21,15 @@ class PreToken:
         return f"PreToken<{self.tokens}>"
 
 
-def pretokenize(text: str, pat: str) -> Counter[PreToken]:
-    # Count pretokens in text.
+def pretokenize(text: str, pat: str, special_tokens: list[str]) -> Counter[PreToken]:
     counts = Counter()
-    for match in re.finditer(pat, text):
-        p = match.group()
-        counts[p] += 1
+    delim = "|".join(re.escape(s) for s in special_tokens)
+
+    # Split text on special tokens, count pretokens in each split.
+    for split in re.splititer(delim, text):
+        for match in re.finditer(pat, split):
+            p = match.group()
+            counts[p] += 1
 
     # Replace pretoken strings with PreToken objects.
     res = Counter()
@@ -49,23 +48,24 @@ def init_global_bpcount(pretokens: Counter[PreToken]) -> Counter[BytePair]:
     return bpcount
 
 
-def init_bpe():
+def init_bpe(special_tokens: list[str]):
     merges: list[BytePair] = []
-    vocab: dict[int, bytes] = {i: bytes([i]) for i in range(1, 256)}
-    vocab[0] = b"<|endoftext|>"
+    vocab: dict[int, bytes] = {i: bytes([i]) for i in range(256)}
+    for i, s in enumerate(special_tokens):
+        vocab[256 + i] = bytes(s, "utf-8")
     return vocab, merges
 
 
 def train_bpe(text: str, vocab_size: int, special_tokens: list[str]):
-    pretokens = pretokenize(text, REGEX_PATTERN)
+    pretokens = pretokenize(text, REGEX_PATTERN, special_tokens)
     bpcount = init_global_bpcount(pretokens)
-    vocab, merges = init_bpe()
+    vocab, merges = init_bpe(special_tokens)
 
     for _ in range(vocab_size - len(vocab)):
         merge_step(pretokens, bpcount, vocab, merges)
 
     return vocab, merges
-    
+
 
 def merge_step(
     pretokens: Counter[PreToken], bpcount: Counter[BytePair], vocab: dict[int, bytes], merges: list[BytePair]
@@ -120,7 +120,13 @@ def handle_pretoken(p: PreToken, pcount: int, merged_bp: BytePair, bpcount: Coun
     p.tokens = new_tokens
 
 
+text = """low low low low low
+lower lower widest widest widest
+newest newest newest newest newest newest
+<|endoftext|>"""
+
+
 def test_main():
-    vocab, merges = train_bpe(text, vocab_size=262, special_tokens=[])
+    vocab, merges = train_bpe(text, vocab_size=262, special_tokens=["<|endoftext|>"])
     print(vocab)
     print(merges)
