@@ -50,7 +50,7 @@ def pretokenize(text: str, pat: str, special_tokens: list[str]) -> Counter[PreTo
     return res
 
 
-def pretokenize_wrapper(fpath: str, si: int, ei: int, pat: str, special_tokens: list[str], q: mp.Queue) -> None:
+def _pretokenize_worker(fpath: str, si: int, ei: int, pat: str, special_tokens: list[str], q: mp.Queue) -> None:
     file = open(fpath, "rb")
     file.seek(si)
     text = file.read(ei - si).decode("utf-8")
@@ -69,16 +69,18 @@ def mp_pretokenize(filepath: str, special_tokens: list[str]) -> Counter[PreToken
     q = mp.Queue()
     for i in range(nprocs):
         si, ei = boundaries[i : i + 2]
-        p = mp.Process(target=pretokenize_wrapper, args=(filepath, si, ei, REGEX_PATTERN, special_tokens, q))
+        p = mp.Process(target=_pretokenize_worker, args=(filepath, si, ei, REGEX_PATTERN, special_tokens, q))
         procs.append(p)
         p.start()
 
-    for i in range(nprocs):
-        procs[i].join()
-
+    # Main process reads right after processes start to avoid blocking queue -> deadlock.
     pretoken_counts: Counter[PreToken] = Counter()
-    while not q.empty():
-        pretoken_counts.update(q.get())  # something is wrong!
+    for _ in range(nprocs):
+        pretoken_counts.update(q.get())
+
+    # Main process waits unitl all child processes to finish.
+    for p in procs:
+        p.join()
 
     return pretoken_counts
 
@@ -201,5 +203,5 @@ def main():
 
 
 if __name__ == "__main__":
-    NUM_PROCS = 1
+    # NUM_PROCS =
     main()
