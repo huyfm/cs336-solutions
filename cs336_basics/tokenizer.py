@@ -1,7 +1,13 @@
 import regex as re
+import os
+import hashlib
 from collections import Counter
+from io import BufferedReader
+import multiprocessing as mp
 
 REGEX_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+DELIMITER = b"<|endoftext|>"
+NUM_PROCS = mp.cpu_count()
 
 BytePair = tuple[bytes, bytes]
 
@@ -9,13 +15,19 @@ BytePair = tuple[bytes, bytes]
 class PreToken:
     def __init__(self, s: str):
         # Pre-compute hash to avoid rehashing many times.
-        self.hash = hash(s)
+        # Use md5 instead of default string hash so that
+        # hashing in all processes produces the same hash.
+        hashstr = hashlib.md5(bytes(s, "utf-8")).hexdigest()
+        self.hash = int(hashstr, 16)
         # Current token list in the PreToken.
         # It wil be updated by handle_pretoken function.
         self.tokens = [bytes([b]) for b in bytes(s, "utf-8")]
 
     def __hash__(self) -> int:
         return self.hash
+
+    def __eq__(self, other):
+        return isinstance(other, PreToken) and self.hash == other.hash
 
     def __repr__(self) -> str:
         return f"PreToken<{self.tokens}>"
@@ -36,6 +48,39 @@ def pretokenize(text: str, pat: str, special_tokens: list[str]) -> Counter[PreTo
     for p in counts:
         res[PreToken(p)] = counts[p]
     return res
+
+
+def pretokenize_wrapper(fpath: str, si: int, ei: int, pat: str, special_tokens: list[str], q: mp.Queue) -> None:
+    file = open(fpath, "rb")
+    file.seek(si)
+    text = file.read(ei - si).decode("utf-8")
+    counts = pretokenize(text, pat, special_tokens)
+    q.put(counts)
+    file.close()
+
+
+def mp_pretokenize(filepath: str, special_tokens: list[str]) -> Counter[PreToken]:
+    file = open(filepath, "rb")
+    nprocs = NUM_PROCS
+    boundaries = make_chunks(file, nprocs, DELIMITER)
+    file.close()
+
+    procs: list[mp.Process] = []
+    q = mp.Queue()
+    for i in range(nprocs):
+        si, ei = boundaries[i : i + 2]
+        p = mp.Process(target=pretokenize_wrapper, args=(filepath, si, ei, REGEX_PATTERN, special_tokens, q))
+        procs.append(p)
+        p.start()
+
+    for i in range(nprocs):
+        procs[i].join()
+
+    pretoken_counts: Counter[PreToken] = Counter()
+    while not q.empty():
+        pretoken_counts.update(q.get())  # something is wrong!
+
+    return pretoken_counts
 
 
 def init_global_bpcount(pretokens: Counter[PreToken]) -> Counter[BytePair]:
@@ -120,13 +165,41 @@ def handle_pretoken(p: PreToken, pcount: int, merged_bp: BytePair, bpcount: Coun
     p.tokens = new_tokens
 
 
-text = """low low low low low
-lower lower widest widest widest
-newest newest newest newest newest newest
-<|endoftext|>"""
+def make_chunks(file: BufferedReader, num_chunks: int, delimiter: bytes) -> list[int]:
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+
+    approx_chunk_size = file_size // num_chunks
+
+    # Initial chunk boundaries: chunk ith is in range [boundaries[i], boundaries[i+1])
+    boundaries = [approx_chunk_size * i for i in range(num_chunks)]
+    boundaries.append(file_size)
+
+    buf_size = 4096
+
+    # Correct boundaries to respect the delimiter.
+    for i in range(num_chunks - 1):
+        end_idx = boundaries[i + 1]
+        file.seek(end_idx - 1)
+        buf = file.read(buf_size)
+        delim_idx = buf.find(delimiter)
+        if delim_idx < 0:
+            raise RuntimeError("Shoud found delimiter while correcting chunk boundary")
+        boundaries[i + 1] = end_idx + delim_idx - 1
+
+    return boundaries
 
 
-def test_main():
-    vocab, merges = train_bpe(text, vocab_size=262, special_tokens=["<|endoftext|>"])
-    print(vocab)
-    print(merges)
+def main():
+    counts = mp_pretokenize("data/tinystories_sample_5M.txt", special_tokens=["<|endoftext|>"])
+    # counts = mp_pretokenize("data/dummy.txt", special_tokens=["<|endoftext|>"])
+    print(counts)
+
+    # total_count = sum(counts.values())
+    # wcount = 1033872
+    # assert total_count > 0.95 * wcount, f"total {total_count} but wcount {wcount}"
+
+
+if __name__ == "__main__":
+    NUM_PROCS = 1
+    main()
