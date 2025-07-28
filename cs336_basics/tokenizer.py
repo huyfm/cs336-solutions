@@ -1,9 +1,11 @@
-import regex as re
-import os
 import hashlib
+import multiprocessing as mp
+import os
+import time
 from collections import Counter
 from io import BufferedReader
-import multiprocessing as mp
+
+import regex as re
 
 REGEX_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 DELIMITER = b"<|endoftext|>"
@@ -26,7 +28,7 @@ class PreToken:
     def __hash__(self) -> int:
         return self.hash
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         return isinstance(other, PreToken) and self.hash == other.hash
 
     def __repr__(self) -> str:
@@ -95,7 +97,7 @@ def init_global_bpcount(pretokens: Counter[PreToken]) -> Counter[BytePair]:
     return bpcount
 
 
-def init_bpe(special_tokens: list[str]):
+def init_bpe(special_tokens: list[str]) -> tuple[dict[int, bytes], list[BytePair]]:
     merges: list[BytePair] = []
     vocab: dict[int, bytes] = {i: bytes([i]) for i in range(256)}
     for i, s in enumerate(special_tokens):
@@ -103,13 +105,21 @@ def init_bpe(special_tokens: list[str]):
     return vocab, merges
 
 
-def train_bpe(text: str, vocab_size: int, special_tokens: list[str]):
-    pretokens = pretokenize(text, REGEX_PATTERN, special_tokens)
+def train_bpe(filepath: str, vocab_size: int, special_tokens: list[str]) -> tuple[dict[int, bytes], list[BytePair]]:
+    t0 = time.perf_counter()
+    pretokens = mp_pretokenize(filepath, special_tokens)
+    print(f"Pretokenization done: {_since(t0):.2f} s")
+
     bpcount = init_global_bpcount(pretokens)
     vocab, merges = init_bpe(special_tokens)
 
-    for _ in range(vocab_size - len(vocab)):
+    # Merge the most frequent pair of bytes until reach vocab size.
+    print("Start BPE merging...")
+    nruns = vocab_size - len(vocab)
+    for i in range(nruns):
+        t0 = time.perf_counter()
         merge_step(pretokens, bpcount, vocab, merges)
+        print(f"\tmerge {i}/{nruns} done: {_since(t0):.2f} s")
 
     return vocab, merges
 
@@ -192,16 +202,20 @@ def make_chunks(file: BufferedReader, num_chunks: int, delimiter: bytes) -> list
     return boundaries
 
 
-def main():
-    counts = mp_pretokenize("data/tinystories_sample_5M.txt", special_tokens=["<|endoftext|>"])
-    # counts = mp_pretokenize("data/dummy.txt", special_tokens=["<|endoftext|>"])
-    print(counts)
+def _since(t0: float) -> float:
+    return time.perf_counter() - t0  # in seconds
 
-    # total_count = sum(counts.values())
-    # wcount = 1033872
-    # assert total_count > 0.95 * wcount, f"total {total_count} but wcount {wcount}"
+
+def test_mp_pretokenizer_sanity_check():
+    counts = mp_pretokenize("data/tinystories_sample_5M.txt", special_tokens=["<|endoftext|>"])
+    total_count = sum(counts.values())
+    wcount = 1033872
+    assert total_count > 0.95 * wcount, f"total {total_count} but wcount {wcount}"
+
+
+def main():
+    train_bpe("data/tinystories_sample_5M.txt", vocab_size=500, special_tokens=["<|endoftext|>"])
 
 
 if __name__ == "__main__":
-    # NUM_PROCS =
     main()
