@@ -1,4 +1,5 @@
 import hashlib
+import json
 import multiprocessing as mp
 import os
 import time
@@ -87,6 +88,37 @@ def mp_pretokenize(filepath: str, special_tokens: list[str]) -> Counter[PreToken
     return pretoken_counts
 
 
+def make_chunks(file: BufferedReader, num_chunks: int, delimiter: bytes) -> list[int]:
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+
+    approx_chunk_size = file_size // num_chunks
+
+    # Initial chunk boundaries: chunk ith is in range [boundaries[i], boundaries[i+1])
+    boundaries = [approx_chunk_size * i for i in range(num_chunks)]
+    boundaries.append(file_size)
+
+    buf_size = 4096 * 4
+
+    # Correct boundaries to respect the delimiter.
+    for i in range(num_chunks - 1):
+        end_idx = boundaries[i + 1]
+        file.seek(end_idx)
+        buf = file.read(buf_size)
+        delim_idx = buf.find(delimiter)
+        # If delimiter is found, shift the right boundary to it.
+        if delim_idx >= 0:
+            boundaries[i + 1] = end_idx + delim_idx
+        # If delimiter is not found, find the next space character
+        # and shift the right boundary to it to avoid chunking at the
+        # middle byte of a utf-8 character.
+        else:
+            space_idx = buf.find(b" ")
+            boundaries[i + 1] = end_idx + space_idx
+
+    return boundaries
+
+
 def init_global_bpcount(pretokens: Counter[PreToken]) -> Counter[BytePair]:
     """Initialize global byte pair count."""
     bpcount: Counter[BytePair] = Counter()
@@ -108,18 +140,18 @@ def init_bpe(special_tokens: list[str]) -> tuple[dict[int, bytes], list[BytePair
 def train_bpe(filepath: str, vocab_size: int, special_tokens: list[str]) -> tuple[dict[int, bytes], list[BytePair]]:
     t0 = time.perf_counter()
     pretokens = mp_pretokenize(filepath, special_tokens)
-    print(f"Pretokenization done: {_since(t0):.2f} s")
+    print(f"Pretokenization done: {since(t0):.2f} s")
 
     bpcount = init_global_bpcount(pretokens)
     vocab, merges = init_bpe(special_tokens)
 
     # Merge the most frequent pair of bytes until reach vocab size.
-    print("Start BPE merging...")
+    print("BPE initialization done. Start BPE merging...")
     nruns = vocab_size - len(vocab)
     for i in range(nruns):
         t0 = time.perf_counter()
         merge_step(pretokens, bpcount, vocab, merges)
-        print(f"\tmerge {i}/{nruns} done: {_since(t0):.2f} s")
+        print(f"\tmerge {i}/{nruns} done: {since(t0):.2f} s")
 
     return vocab, merges
 
@@ -177,44 +209,42 @@ def handle_pretoken(p: PreToken, pcount: int, merged_bp: BytePair, bpcount: Coun
     p.tokens = new_tokens
 
 
-def make_chunks(file: BufferedReader, num_chunks: int, delimiter: bytes) -> list[int]:
-    file.seek(0, os.SEEK_END)
-    file_size = file.tell()
-
-    approx_chunk_size = file_size // num_chunks
-
-    # Initial chunk boundaries: chunk ith is in range [boundaries[i], boundaries[i+1])
-    boundaries = [approx_chunk_size * i for i in range(num_chunks)]
-    boundaries.append(file_size)
-
-    buf_size = 4096
-
-    # Correct boundaries to respect the delimiter.
-    for i in range(num_chunks - 1):
-        end_idx = boundaries[i + 1]
-        file.seek(end_idx - 1)
-        buf = file.read(buf_size)
-        delim_idx = buf.find(delimiter)
-        if delim_idx < 0:
-            raise RuntimeError("Shoud found delimiter while correcting chunk boundary")
-        boundaries[i + 1] = end_idx + delim_idx - 1
-
-    return boundaries
-
-
-def _since(t0: float) -> float:
+def since(t0: float) -> float:
     return time.perf_counter() - t0  # in seconds
+
+
+def btos(bs: bytes) -> str:
+    """Convert UTF-8 bytes to string, replace invalid bytes with equivalent hex strings."""
+    return str(bs)[2:-1]
+
+
+def serialize_bpe(dirpath: str, vocab: dict[int, bytes], merges: list[BytePair]) -> None:
+    # Convert bytes in vocab to string as bytes are not JSON serializable
+    out_vocab: dict[str, int] = {}
+    for i, bs in vocab.items():
+        out_vocab[btos(bs)] = i
+
+    with open(f"{dirpath}/bpe_vocab.json", "w") as f:
+        json.dump(out_vocab, f, indent=2)
+
+    with open(f"{dirpath}/bpe_merges.txt", "w") as f:
+        for b1, b2 in merges:
+            line = btos(b1) + " " + btos(b2) + "\n"
+            f.write(line)
 
 
 def test_mp_pretokenizer_sanity_check():
     counts = mp_pretokenize("data/tinystories_sample_5M.txt", special_tokens=["<|endoftext|>"])
     total_count = sum(counts.values())
     wcount = 1033872
-    assert total_count > 0.95 * wcount, f"total {total_count} but wcount {wcount}"
+    assert total_count > 0.95 * wcount, f"Pretoken count should roughly equal word count"
 
 
 def main():
-    train_bpe("data/tinystories_sample_5M.txt", vocab_size=500, special_tokens=["<|endoftext|>"])
+    trainpath = "data/tinystories_sample_5M.txt"
+    respath = "bpe_train/"
+    vocab, merges = train_bpe(trainpath, vocab_size=500, special_tokens=["<|endoftext|>"])
+    serialize_bpe(respath, vocab, merges)
 
 
 if __name__ == "__main__":

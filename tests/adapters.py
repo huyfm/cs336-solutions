@@ -25,6 +25,7 @@ from cs336_basics.modules import (
     scaled_dot_product_attention,
     softmax,
 )
+from cs336_basics.tokenizer import train_bpe
 
 
 def run_linear(
@@ -672,4 +673,8 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    if isinstance(input_path, os.PathLike):
+        filepath = str(input_path)
+    else:
+        filepath = input_path
+    return train_bpe(filepath, vocab_size, special_tokens)    
