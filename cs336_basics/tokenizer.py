@@ -241,7 +241,7 @@ def test_mp_pretokenizer_sanity_check():
 
 
 def main():
-    trainpath = "data/tinystories_sample_5M.txt"
+    trainpath = "bpe_train/data/tinystories_sample_5M.txt"
     respath = "bpe_train/"
     vocab, merges = train_bpe(trainpath, vocab_size=500, special_tokens=["<|endoftext|>"])
     serialize_bpe(respath, vocab, merges)
