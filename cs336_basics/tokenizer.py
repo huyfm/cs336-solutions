@@ -2,6 +2,7 @@ import hashlib
 import json
 import multiprocessing as mp
 import os
+import pickle
 import time
 from collections import Counter
 from io import BufferedReader
@@ -142,16 +143,21 @@ def train_bpe(filepath: str, vocab_size: int, special_tokens: list[str]) -> tupl
     pretokens = mp_pretokenize(filepath, special_tokens)
     print(f"Pretokenization done: {since(t0):.2f} s")
 
+    t0 = time.perf_counter()
     bpcount = init_global_bpcount(pretokens)
     vocab, merges = init_bpe(special_tokens)
+    print(f"BPE initialization done: {since(t0):.2f} s")
 
-    # Merge the most frequent pair of bytes until reach vocab size.
-    print("BPE initialization done. Start BPE merging...")
+    # Merge the most frequent pair of bytes iteratively until reach vocab size.
+    print("Start BPE merging...")
     nruns = vocab_size - len(vocab)
+    t0 = time.perf_counter()
     for i in range(nruns):
-        t0 = time.perf_counter()
+        t1 = time.perf_counter()
         merge_step(pretokens, bpcount, vocab, merges)
-        print(f"\tmerge {i}/{nruns} done: {since(t0):.2f} s")
+        print(f"\tmerge {i}/{nruns} done: {since(t1):.2f} s", end="\r")
+    print()
+    print(f"BPE training done: {since(t0):.2f} s")
 
     return vocab, merges
 
@@ -219,11 +225,21 @@ def btos(bs: bytes) -> str:
 
 
 def serialize_bpe(dirpath: str, vocab: dict[int, bytes], merges: list[BytePair]) -> None:
+    os.makedirs(dirpath, exist_ok=True)
+
+    # Save vocab and merge list objects to disk.
+    with open(f"{dirpath}/bpe_vocab.pkl", "wb") as f:
+        pickle.dump(vocab, f)
+
+    with open(f"{dirpath}/bpe_merges.pkl", "wb") as f:
+        pickle.dump(merges, f)
+
     # Convert bytes in vocab to string as bytes are not JSON serializable
     out_vocab: dict[str, int] = {}
     for i, bs in vocab.items():
         out_vocab[btos(bs)] = i
 
+    # Save vocab and merge list in human-readable format.
     with open(f"{dirpath}/bpe_vocab.json", "w") as f:
         json.dump(out_vocab, f, indent=2)
 
@@ -231,21 +247,3 @@ def serialize_bpe(dirpath: str, vocab: dict[int, bytes], merges: list[BytePair])
         for b1, b2 in merges:
             line = btos(b1) + " " + btos(b2) + "\n"
             f.write(line)
-
-
-def test_mp_pretokenizer_sanity_check():
-    counts = mp_pretokenize("data/tinystories_sample_5M.txt", special_tokens=["<|endoftext|>"])
-    total_count = sum(counts.values())
-    wcount = 1033872
-    assert total_count > 0.95 * wcount, f"Pretoken count should roughly equal word count"
-
-
-def main():
-    trainpath = "bpe_train/data/tinystories_sample_5M.txt"
-    respath = "bpe_train/"
-    vocab, merges = train_bpe(trainpath, vocab_size=500, special_tokens=["<|endoftext|>"])
-    serialize_bpe(respath, vocab, merges)
-
-
-if __name__ == "__main__":
-    main()
