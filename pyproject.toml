@@ -23,6 +23,7 @@ dependencies = [
     "ipykernel>=6.29.5",
     "pillow>=11.3.0",
     "matplotlib>=3.10.3",
+    "ninja>=1.11.1.4",
 ]
 
 

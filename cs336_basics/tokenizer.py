@@ -151,6 +151,8 @@ def train_bpe(filepath: str, vocab_size: int, special_tokens: list[str]) -> tupl
     # Merge the most frequent pair of bytes iteratively until reach vocab size.
     print("Start BPE merging...")
     nruns = vocab_size - len(vocab)
+    print(f"Number of pretokens:", len(pretokens))
+    print(f"Number of merges:", nruns)
     t0 = time.perf_counter()
     for i in range(nruns):
         t1 = time.perf_counter()
