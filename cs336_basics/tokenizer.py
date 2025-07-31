@@ -4,7 +4,7 @@ import multiprocessing as mp
 import os
 import pickle
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from io import BufferedReader
 
 import regex as re
@@ -34,7 +34,7 @@ class PreToken:
         return isinstance(other, PreToken) and self.hash == other.hash
 
     def __repr__(self) -> str:
-        return f"PreToken<{self.tokens}>"
+        return f"PreToken<{b''.join(self.tokens)}>"
 
 
 def pretokenize(text: str, pat: str, special_tokens: list[str]) -> Counter[PreToken]:
@@ -120,14 +120,17 @@ def make_chunks(file: BufferedReader, num_chunks: int, delimiter: bytes) -> list
     return boundaries
 
 
-def init_global_bpcount(pretokens: Counter[PreToken]) -> Counter[BytePair]:
-    """Initialize global byte pair count."""
+def init_global_bpcount(pretokens: Counter[PreToken]) -> tuple[Counter[BytePair], defaultdict[BytePair, set[PreToken]]]:
+    """Initialize global byte pair count and index."""
     bpcount: Counter[BytePair] = Counter()
+    bpindex: defaultdict[BytePair, set[PreToken]] = defaultdict(set)
     for p in pretokens.keys():
         for b1, b2 in zip(p.tokens[:-1], p.tokens[1:]):
             bp = (b1, b2)
             bpcount[bp] += pretokens[p]
-    return bpcount
+            bpindex[bp].add(p)
+
+    return bpcount, bpindex
 
 
 def init_bpe(special_tokens: list[str]) -> tuple[dict[int, bytes], list[BytePair]]:
@@ -144,7 +147,7 @@ def train_bpe(filepath: str, vocab_size: int, special_tokens: list[str]) -> tupl
     print(f"Pretokenization done: {since(t0):.2f} s")
 
     t0 = time.perf_counter()
-    bpcount = init_global_bpcount(pretokens)
+    bpcount, bpindex = init_global_bpcount(pretokens)
     vocab, merges = init_bpe(special_tokens)
     print(f"BPE initialization done: {since(t0):.2f} s")
 
@@ -156,7 +159,7 @@ def train_bpe(filepath: str, vocab_size: int, special_tokens: list[str]) -> tupl
     t0 = time.perf_counter()
     for i in range(nruns):
         t1 = time.perf_counter()
-        merge_step(pretokens, bpcount, vocab, merges)
+        merge_step(pretokens, bpcount, bpindex, vocab, merges)
         print(f"\tmerge {i}/{nruns} done: {since(t1):.2f} s", end="\r")
     print()
     print(f"BPE training done: {since(t0):.2f} s")
@@ -165,7 +168,11 @@ def train_bpe(filepath: str, vocab_size: int, special_tokens: list[str]) -> tupl
 
 
 def merge_step(
-    pretokens: Counter[PreToken], bpcount: Counter[BytePair], vocab: dict[int, bytes], merges: list[BytePair]
+    pretokens: Counter[PreToken],
+    bpcount: Counter[BytePair],
+    bpindex: defaultdict[BytePair, set[PreToken]],
+    vocab: dict[int, bytes],
+    merges: list[BytePair],
 ) -> None:
     # 1. Get most frequent byte pair.
     max_bp = max(bpcount, key=lambda x: (bpcount[x], x))
@@ -174,43 +181,66 @@ def merge_step(
     merges.append(max_bp)
     vocab[len(vocab)] = b"".join(max_bp)
 
-    # 3. Update global byte pair count bpcount by processing each pretoken
-    # and update bpcount in-place for all pairs that are affected by the merge.
-    # And also update the token list in the pretoken with the new merged token.
-    for p, pcount in pretokens.items():
-        handle_pretoken(p, pcount, max_bp, bpcount)
+    # 3. Process pretokens affected by the merge.
+    # Update bpcount and bpindex in-place.
+    for p in bpindex[max_bp].copy():  # copy to avoid in-place update causes runtime error
+        pcount = pretokens[p]
+        handle_pretoken(p, pcount, max_bp, bpcount, bpindex)
+
+    # Remove merged pair's count and index after the merge.
+    del bpindex[max_bp]
+    del bpcount[max_bp]
 
 
-def handle_pretoken(p: PreToken, pcount: int, merged_bp: BytePair, bpcount: Counter[BytePair]) -> None:
+def handle_pretoken(
+    p: PreToken,
+    pcount: int,
+    merged_bp: BytePair,
+    bpcount: Counter[BytePair],
+    bpindex: defaultdict[BytePair, set[PreToken]],
+) -> None:
     new_tokens = []
     merged_token = b"".join(merged_bp)
     i = 0
     while i < len(p.tokens):
-        # Either reach the end or current pair not match
+        # Either reach the end or current pair not match.
         if i == len(p.tokens) - 1 or tuple(p.tokens[i : i + 2]) != merged_bp:
             new_tokens.append(p.tokens[i])
             i += 1
             continue
 
-        # Found a match, reduce merged pair count.
+        # Found a match.
         new_tokens.append(merged_token)
-        bpcount[merged_bp] -= pcount
 
         # Previous pair will be replaced by a pair with the second token
-        # becomes the merged token.
+        # becomes the new merged token.
         if i - 1 >= 0:
-            prev_bp = (p.tokens[i - 1], p.tokens[i])
+            old_bp = (p.tokens[i - 1], p.tokens[i])
             new_bp = (p.tokens[i - 1], merged_token)
-            bpcount[prev_bp] -= pcount
+            # Update bpcount.
+            bpcount[old_bp] -= pcount
             bpcount[new_bp] += pcount
+            # Update bpindex.
+            try:
+                bpindex[old_bp].remove(p)
+            except KeyError:
+                pass
+            bpindex[new_bp].add(p)
 
         # Next pair will be replaced by a pair with the first token
         # becomes the merged token.
         if i + 2 < len(p.tokens):
-            next_bp = (p.tokens[i + 1], p.tokens[i + 2])
+            old_bp = (p.tokens[i + 1], p.tokens[i + 2])
             new_bp = (merged_token, p.tokens[i + 2])
-            bpcount[next_bp] -= pcount
+            # Update bpcount.
+            bpcount[old_bp] -= pcount
             bpcount[new_bp] += pcount
+            # Update bpindex.
+            try:
+                bpindex[old_bp].remove(p)
+            except KeyError:
+                pass
+            bpindex[new_bp].add(p)
 
         i += 2
 
@@ -249,3 +279,30 @@ def serialize_bpe(dirpath: str, vocab: dict[int, bytes], merges: list[BytePair])
         for b1, b2 in merges:
             line = btos(b1) + " " + btos(b2) + "\n"
             f.write(line)
+
+
+def test_bpe_training():
+    # Use pytest to run the test.
+    vocab_size = 256 + 1 + 6
+    vocab, _ = train_bpe("tests/fixtures/testtext.txt", vocab_size, ["<|endoftext|>"])
+    assert len(vocab) == vocab_size
+
+    expected_merged_tokens = [b"ss", b"st", b"est", b"ow", b"low", b"west"]
+    assert all(s in vocab.values() for s in expected_merged_tokens)
+
+
+class Tokenizer:
+    def __init__(self):
+        pass
+
+    def from_files(self, vocab_filepath: str, merges_filepath: str) -> None:
+        ...
+
+    def encode(self, text: str) -> list[int]:
+        ...
+
+    def encodeiter(self, text: str) -> list[int]:
+        ...
+
+    def decode(self, ids: list[int]) -> str:
+        ...
