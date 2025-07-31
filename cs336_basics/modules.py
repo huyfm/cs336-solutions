@@ -60,7 +60,7 @@ class RMSNorm(nn.Module):
         # Use f32 to avoid overflow when squaring.
         mean_squared = reduce(x_f32**2, "b seq d_model -> b seq 1", "mean")
         rms = torch.sqrt(mean_squared + self.eps)
-        return x / rms * self.weight
+        return x / rms.to(x.dtype) * self.weight
 
 
 class FFN(nn.Module):
@@ -300,8 +300,9 @@ class AdamW(torch.optim.Optimizer):
                 # Initialize param state if not exist.
                 if len(state) == 0:
                     state["t"] = 0  # current timestep
-                    state["m"] = torch.zeros_like(p)  # first moment
-                    state["v"] = torch.zeros_like(p)  # second moment
+                    # Use float32 for numerical stability.
+                    state["m"] = torch.zeros_like(p, dtype=torch.float32, device=p.device)  # first moment
+                    state["v"] = torch.zeros_like(p, dtype=torch.float32, device=p.device)  # second moment
 
                 # Advance timestep.
                 state["t"] += 1
@@ -348,11 +349,11 @@ def gradient_clipping(params: Iterable[Tensor], max_l2_norm: float) -> None:
     except StopIteration:
         return
 
-    squared_norm = torch.tensor(0.0, device=device)
+    squared_norm = torch.tensor(0.0, dtype=torch.float32, device=device)
     for p in params:
         if p.grad is None:
             continue
-        squared_norm += p.grad.pow(2).sum()
+        squared_norm += p.grad.to(torch.float32).pow(2).sum()
     norm = squared_norm.sqrt()
 
     if norm > max_l2_norm:
