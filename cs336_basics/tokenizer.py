@@ -292,17 +292,67 @@ def test_bpe_training():
 
 
 class Tokenizer:
-    def __init__(self):
-        pass
+    def __init__(self, vocab_filepath: str, merges_filepath: str, special_tokens: list[str]):
+        self.special_tokens = special_tokens
+        self.special_tokens.append("<|endoftext|>")
 
-    def from_files(self, vocab_filepath: str, merges_filepath: str) -> None:
-        ...
+        with open(vocab_filepath, "rb") as f:
+            self.itob: dict[int, bytes] = pickle.load(f)
+        # Append user-defined special tokens (not in the tokenizer).
+        for s in self.special_tokens:
+            b = bytes(s, "utf-8")
+            if b not in self.itob:
+                self.itob[len(self.itob)] = b
+
+        self.btoi = {b: i for i, b in self.itob.items()}
+
+        with open(merges_filepath, "rb") as f:
+            self.merges: list[BytePair] = pickle.load(f)
 
     def encode(self, text: str) -> list[int]:
-        ...
+        ids: list[int] = []
+        pattern = "|".join(re.escape(s) for s in self.special_tokens + [REGEX_PATTERN])
 
-    def encodeiter(self, text: str) -> list[int]:
-        ...
+        # 1. Pretokenize text.
+        pretokens: list[bytes] = []
+        for match in re.finditer(pattern, text):
+            s = match.group()
+            pretokens.append(bytes(s, "utf-8"))
 
-    def decode(self, ids: list[int]) -> str:
-        ...
+        # 2. Apply merges on each token. (can parallelize)
+        for pt in pretokens:
+            pt_encoding = self._apply_merges(pt)
+            ids.extend(pt_encoding)
+
+        return ids
+
+    def _apply_merges(self, pretoken: bytes) -> list[int]:
+        cur_tokens = [bytes([b]) for b in pretoken]
+        new_tokens: list[bytes] = []
+
+        for merged_bp in self.merges:
+            if len(cur_tokens) == 1:
+                break
+            i = 0
+            while i < len(cur_tokens):
+                if i == len(cur_tokens) - 1 or (cur_tokens[i], cur_tokens[i + 1]) != merged_bp:
+                    new_tokens.append(cur_tokens[i])
+                    i += 1
+                else:
+                    merged_token = merged_bp[0] + merged_bp[1]
+                    new_tokens.append(merged_token)
+                    i += 2
+            cur_tokens = new_tokens
+
+        ids = [self.btoi[t] for t in cur_tokens]
+        return ids
+
+    def encodeiter(self, text: str) -> list[int]: ...
+
+    def decode(self, ids: list[int]) -> str: ...
+
+
+def test_tokenizer_encode():
+    vocab = {0: b" ", 1: b"a", 2: b"c", 3: b"e", 4: b"h", 5: b"t", 6: b"th", 7: b" c", 8: b" a", 9: b"the", 10: b" at"}
+    merges = [(b't', b'h'), (b' ', b'c'), (b' ', 'a'), (b'th', b'e'), (b' a', b't')]
+
