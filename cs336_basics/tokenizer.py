@@ -6,6 +6,7 @@ import pickle
 import time
 from collections import Counter, defaultdict
 from io import BufferedReader
+from typing import Iterable, Iterator
 
 import regex as re
 
@@ -292,30 +293,38 @@ def test_bpe_training():
 
 
 class Tokenizer:
-    def __init__(self, vocab_filepath: str, merges_filepath: str, special_tokens: list[str]):
-        self.special_tokens = special_tokens
-        self.special_tokens.append("<|endoftext|>")
+    def __init__(self, vocab: dict[int, bytes], merges: list[BytePair], special_tokens: list[str] | None = None):
+        self.itob = vocab
+        self.merges = merges
+        self.special_tokens: list[str] = []
 
-        with open(vocab_filepath, "rb") as f:
-            self.itob: dict[int, bytes] = pickle.load(f)
-        # Append user-defined special tokens (not in the tokenizer).
-        for s in self.special_tokens:
-            b = bytes(s, "utf-8")
-            if b not in self.itob:
-                self.itob[len(self.itob)] = b
+        # Add user-defined special tokens.
+        if special_tokens is not None:
+            self.special_tokens += special_tokens
+            for s in special_tokens:
+                b = bytes(s, "utf-8")
+                if b not in self.itob:
+                    self.itob[len(self.itob)] = b
 
         self.btoi = {b: i for i, b in self.itob.items()}
-
+        patterns = [re.escape(s) for s in self.special_tokens]
+        patterns.append(REGEX_PATTERN)
+        self.pattern = "|".join(patterns)
+    
+    @classmethod
+    def from_files(cls, vocab_filepath: str, merges_filepath: str, special_tokens: list[str] | None = None):
+        with open(vocab_filepath, "rb") as f:
+            vocab: dict[int, bytes] = pickle.load(f)
         with open(merges_filepath, "rb") as f:
-            self.merges: list[BytePair] = pickle.load(f)
+            merges: list[BytePair] = pickle.load(f)
+        return cls(vocab, merges, special_tokens)
 
     def encode(self, text: str) -> list[int]:
         ids: list[int] = []
-        pattern = "|".join(re.escape(s) for s in self.special_tokens + [REGEX_PATTERN])
 
         # 1. Pretokenize text.
         pretokens: list[bytes] = []
-        for match in re.finditer(pattern, text):
+        for match in re.finditer(self.pattern, text):
             s = match.group()
             pretokens.append(bytes(s, "utf-8"))
 
@@ -327,32 +336,37 @@ class Tokenizer:
         return ids
 
     def _apply_merges(self, pretoken: bytes) -> list[int]:
-        cur_tokens = [bytes([b]) for b in pretoken]
-        new_tokens: list[bytes] = []
+        tokens = [bytes([b]) for b in pretoken]
 
         for merged_bp in self.merges:
-            if len(cur_tokens) == 1:
+            if len(tokens) == 1:
                 break
+            temp: list[bytes] = []
             i = 0
-            while i < len(cur_tokens):
-                if i == len(cur_tokens) - 1 or (cur_tokens[i], cur_tokens[i + 1]) != merged_bp:
-                    new_tokens.append(cur_tokens[i])
+            while i < len(tokens):
+                if i == len(tokens) - 1 or (tokens[i], tokens[i+1]) != merged_bp:
+                    temp.append(tokens[i])
                     i += 1
                 else:
                     merged_token = merged_bp[0] + merged_bp[1]
-                    new_tokens.append(merged_token)
+                    temp.append(merged_token)
                     i += 2
-            cur_tokens = new_tokens
+            tokens = temp
 
-        ids = [self.btoi[t] for t in cur_tokens]
+        ids = [self.btoi[t] for t in tokens]
         return ids
 
-    def encodeiter(self, text: str) -> list[int]: ...
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        # for text in iterable:
+        #     yield 
 
     def decode(self, ids: list[int]) -> str: ...
 
 
 def test_tokenizer_encode():
     vocab = {0: b" ", 1: b"a", 2: b"c", 3: b"e", 4: b"h", 5: b"t", 6: b"th", 7: b" c", 8: b" a", 9: b"the", 10: b" at"}
-    merges = [(b't', b'h'), (b' ', b'c'), (b' ', 'a'), (b'th', b'e'), (b' a', b't')]
-
+    merges = [(b't', b'h'), (b' ', b'c'), (b' ', b'a'), (b'th', b'e'), (b' a', b't')]
+    m = Tokenizer(vocab, merges)
+    res = m.encode("the cat ate")
+    expected = [9, 7, 1, 5, 10, 3]
+    assert res == expected, res
