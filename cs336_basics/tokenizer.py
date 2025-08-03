@@ -64,9 +64,8 @@ def _pretokenize_worker(fpath: str, si: int, ei: int, pat: str, special_tokens: 
     file.close()
 
 
-def mp_pretokenize(filepath: str, special_tokens: list[str]) -> Counter[PreToken]:
+def mp_pretokenize(filepath: str, special_tokens: list[str], nprocs: int = NUM_PROCS) -> Counter[PreToken]:
     file = open(filepath, "rb")
-    nprocs = NUM_PROCS
     boundaries = make_chunks(file, nprocs, DELIMITER)
     file.close()
 
