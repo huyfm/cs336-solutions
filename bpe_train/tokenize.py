@@ -1,8 +1,9 @@
+from pathlib import Path
+
 import numpy as np
+import tiktoken
 
 from cs336_basics.tokenizer import Tokenizer
-
-BUFSIZE = 4096
 
 
 def get_encoder(name: str) -> Tokenizer:
@@ -18,28 +19,19 @@ def get_encoder(name: str) -> Tokenizer:
             merges_filepath="bpe_train/tinystories/bpe_merges.pkl",
             special_tokens=["<|endoftext|>"],
         )
-    raise ValueError("Supported encoder name: openwebtext, tinystories")
+    raise ValueError("Unsupported name")
 
 
-def tokenize_tinystories() -> None:
-    enc = get_encoder("tinystories")
-    out = open("data/TinyStoriesV2-GPT4-valid.dat", "wb")
-    buf = np.zeros(4096, dtype=np.float16)
-    i = 0  # buffer's write index
+def tokenize_data(fpath: str) -> None:
+    enc = tiktoken.get_encoding("gpt2")
+    savepath = Path(fpath).parent / f"{Path(fpath).stem}.dat"
 
-    f = open("data/TinyStoriesV2-GPT4-valid.txt")
-    enc.encode(f.read())
-    print("DONE")
-    # for idx in enc.encode_iterable(f):
-    #     buf[i] = idx
-    #     i += 1
-    #     if i >= BUFSIZE:
-    #         buf.tofile(out)
-    #         i = 0
-
-    # out.close()
-    # f.close()
+    with open(fpath, encoding="utf-8") as fin, open(savepath, "ab") as fout:
+        for line in fin:
+            ids = enc.encode(line, allowed_special={"<|endoftext|>"})
+            arr = np.array(ids, dtype=np.uint16)
+            arr.tofile(fout)
 
 
 if __name__ == "__main__":
-    tokenize_tinystories()
+    tokenize_data("data/TinyStoriesV2-GPT4-valid.txt")
