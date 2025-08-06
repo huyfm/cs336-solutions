@@ -25,8 +25,8 @@ from cs336_basics.modules import (
     scaled_dot_product_attention,
     softmax,
 )
-from cs336_basics.tokenizer import Tokenizer, train_bpe
-from cs336_basics.train import get_batch
+from cs336_basics.bpe import Tokenizer, train_bpe
+from cs336_basics.utils import get_batch
 
 
 def run_linear(

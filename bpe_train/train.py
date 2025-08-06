@@ -1,4 +1,4 @@
-from cs336_basics.tokenizer import serialize_bpe, train_bpe
+from cs336_basics.bpe import serialize_bpe, train_bpe
 
 
 def main():

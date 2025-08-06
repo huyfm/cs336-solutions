@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import tiktoken
 
-from cs336_basics.tokenizer import Tokenizer
+from cs336_basics.bpe import Tokenizer
 
 
 def get_encoder(name: str) -> Tokenizer:
