@@ -226,7 +226,7 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class TransformerLM(nn.Module):
+class Transformer(nn.Module):
     def __init__(
         self,
         vocab_size: int,
@@ -263,9 +263,9 @@ class TransformerLM(nn.Module):
         return logit
 
 
-def cross_entropy(x: Float[Tensor, "... batch dim"], targets: Int[Tensor, "... batch"]) -> Float[Tensor, ""]:
+def cross_entropy(logits: Float[Tensor, "... batch dim"], targets: Int[Tensor, "... batch"]) -> Float[Tensor, ""]:
     # b = total batch dimension.
-    x = rearrange(x, "... batch dim -> (... batch) dim")  # (b, dim)
+    x = rearrange(logits, "... batch dim -> (... batch) dim")  # (b, dim)
     xmax = reduce(x, "b dim -> b 1", "max")
     logsumexp = (x - xmax).exp().sum(dim=-1).log()  # (b,)
     xtarget = x[torch.arange(x.size(0)), targets]  # (b,)
@@ -276,7 +276,7 @@ def cross_entropy(x: Float[Tensor, "... batch dim"], targets: Int[Tensor, "... b
 
 
 class AdamW(torch.optim.Optimizer):
-    def __init__(self, params: ParamsT, lr: int, betas: tuple[int, int], eps: float, weight_decay: float):
+    def __init__(self, params: ParamsT, lr: float, betas: tuple[float, float], eps: float, weight_decay: float):
         defaults = {
             "lr": lr,
             "betas": betas,

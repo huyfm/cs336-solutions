@@ -19,7 +19,7 @@ from cs336_basics.modules import (
     RMSNorm,
     RoPE,
     TransformerBlock,
-    TransformerLM,
+    Transformer,
     cosine_lr,
     cross_entropy,
     gradient_clipping,
@@ -404,7 +404,7 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    m = TransformerLM(vocab_size, context_length, num_layers, d_model, num_heads, d_ff, rope_theta)
+    m = Transformer(vocab_size, context_length, num_layers, d_model, num_heads, d_ff, rope_theta)
     state_dict = {
         "token_embd.weight": weights["token_embeddings.weight"],
         "ln_f.weight": weights["ln_final.weight"],

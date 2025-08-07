@@ -3,20 +3,15 @@ from typing import IO, BinaryIO
 
 import numpy as np
 import torch
-from torch import Tensor
 
 
-def get_batch(data: np.ndarray, batch_size: int, ctx_len: int, device: str) -> tuple[Tensor, Tensor]:
-    ids = np.random.randint(len(data) - ctx_len, size=batch_size)
-
-    xs = [torch.from_numpy(data[i : i + ctx_len]) for i in ids]
-    inputs = torch.stack(xs, dim=0).to(device)
-
-    # targets are inputs shifted by 1.
-    ys = [torch.from_numpy(data[i + 1 : i + 1 + ctx_len]) for i in ids]
-    targets = torch.stack(ys, dim=0).to(device)
-
-    return inputs, targets
+def get_batch(data: np.ndarray, B: int, T: int, device: torch.device | str) -> tuple[torch.Tensor, torch.Tensor]:
+    ids = np.random.randint(len(data) - T, size=B)
+    x_np = np.stack([data[i : i + T] for i in ids], axis=0)
+    x = torch.from_numpy(x_np).to(device)  # (B, T)
+    y_np = np.stack([data[i + 1 : i + T + 1] for i in ids], axis=0)
+    y = torch.from_numpy(y_np).to(device)  # (B, T)
+    return x, y
 
 
 def save_checkpoint(
