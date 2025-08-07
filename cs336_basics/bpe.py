@@ -10,7 +10,7 @@ from io import BufferedReader
 
 import regex as re
 
-PRETOKENIZE_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+PRETOK_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 DELIMITER = b"<|endoftext|>"
 NUM_PROCS = mp.cpu_count()
 
@@ -66,14 +66,14 @@ def _pretokenize_worker(fpath: str, si: int, ei: int, pat: str, special_tokens: 
 
 def mp_pretokenize(filepath: str, special_tokens: list[str], nprocs: int = NUM_PROCS) -> Counter[PreToken]:
     file = open(filepath, "rb")
-    boundaries = make_chunks(file, nprocs, DELIMITER)
+    boundaries = make_chunks(file, nprocs)
     file.close()
 
     procs: list[mp.Process] = []
     q = mp.Queue()
     for i in range(nprocs):
         si, ei = boundaries[i : i + 2]
-        p = mp.Process(target=_pretokenize_worker, args=(filepath, si, ei, PRETOKENIZE_PATTERN, special_tokens, q))
+        p = mp.Process(target=_pretokenize_worker, args=(filepath, si, ei, PRETOK_PATTERN, special_tokens, q))
         procs.append(p)
         p.start()
 
@@ -89,7 +89,7 @@ def mp_pretokenize(filepath: str, special_tokens: list[str], nprocs: int = NUM_P
     return pretoken_counts
 
 
-def make_chunks(file: BufferedReader, num_chunks: int, delimiter: bytes) -> list[int]:
+def make_chunks(file: BufferedReader, num_chunks: int) -> list[int]:
     file.seek(0, os.SEEK_END)
     file_size = file.tell()
 
@@ -99,23 +99,18 @@ def make_chunks(file: BufferedReader, num_chunks: int, delimiter: bytes) -> list
     boundaries = [approx_chunk_size * i for i in range(num_chunks)]
     boundaries.append(file_size)
 
-    buf_size = 4096 * 4
+    buf_size = 1024
 
-    # Correct boundaries to respect the delimiter.
+    # Correct boundaries to respect the pretokens.
     for i in range(num_chunks - 1):
         end_idx = boundaries[i + 1]
         file.seek(end_idx)
         buf = file.read(buf_size)
-        delim_idx = buf.find(delimiter)
-        # If delimiter is found, shift the right boundary to it.
-        if delim_idx >= 0:
-            boundaries[i + 1] = end_idx + delim_idx
-        # If delimiter is not found, find the next space character
-        # and shift the right boundary to it to avoid chunking at the
-        # middle byte of a utf-8 character.
-        else:
-            space_idx = buf.find(b" ")
-            boundaries[i + 1] = end_idx + space_idx
+        # Shift right boundary to the next space character.
+        # This strategy works well for GPT2's defined pretokens
+        # and current datasets (english).
+        space_idx = buf.find(b" ")
+        boundaries[i + 1] = end_idx + space_idx
 
     return boundaries
 
@@ -340,7 +335,7 @@ class Tokenizer:
                 ids.append(self.btoi[bytechunk])
                 continue
             # Break chunk into pretokens.
-            pretokens = [bytes(s, "utf-8") for s in re.findall(PRETOKENIZE_PATTERN, chunk)]
+            pretokens = [bytes(s, "utf-8") for s in re.findall(PRETOK_PATTERN, chunk)]
             # Tokenize each pretoken and collect token IDs.
             for pt in pretokens:
                 encoded_ids = self._merge_pretoken(pt)
