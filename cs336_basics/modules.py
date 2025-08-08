@@ -241,7 +241,7 @@ class Transformer(nn.Module):
     ):
         super().__init__()
         # Embed token indices to a sequence of token embeddings.
-        self.token_embd = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+        self.token_embd = Embedding(num_embeddings=vocab_size, embedding_dim=d_model, dtype=dtype, device=device)
 
         # Attention blocks that process the token embeddings
         # and compute the predicted feature vectors.
@@ -264,14 +264,15 @@ class Transformer(nn.Module):
 
 
 def cross_entropy(logits: Float[Tensor, "... batch dim"], targets: Int[Tensor, "... batch"]) -> Float[Tensor, ""]:
-    # b = total batch dimension.
-    x = rearrange(logits, "... batch dim -> (... batch) dim")  # (b, dim)
-    xmax = reduce(x, "b dim -> b 1", "max")
-    logsumexp = (x - xmax).exp().sum(dim=-1).log()  # (b,)
-    xtarget = x[torch.arange(x.size(0)), targets]  # (b,)
-    xmax = xmax.view(-1)  # (b,)
+    # Flatten batch dimensions of both inputs.
+    x = rearrange(logits, "... batch dim -> (... batch) dim")
+    targets = rearrange(targets, "... batch -> (... batch)")
 
-    out = (xmax + logsumexp - xtarget).mean()
+    xmax = reduce(x, "B dim -> B 1", "max")  # B: total batch dims
+    logsumexp = (x - xmax).exp().sum(dim=-1).log()
+    xtarget = x[torch.arange(x.size(0)), targets]
+
+    out = (xmax.view(-1) + logsumexp - xtarget).mean()
     return out
 
 

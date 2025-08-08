@@ -8,9 +8,9 @@ import torch
 def get_batch(data: np.ndarray, B: int, T: int, device: torch.device | str) -> tuple[torch.Tensor, torch.Tensor]:
     ids = np.random.randint(len(data) - T, size=B)
     x_np = np.stack([data[i : i + T] for i in ids], axis=0)
-    x = torch.from_numpy(x_np).to(device)  # (B, T)
+    x = torch.from_numpy(x_np).to(dtype=torch.int64, device=device)  # (B, T)
     y_np = np.stack([data[i + 1 : i + T + 1] for i in ids], axis=0)
-    y = torch.from_numpy(y_np).to(device)  # (B, T)
+    y = torch.from_numpy(y_np).to(dtype=torch.int64, device=device)  # (B, T)
     return x, y
 
 
