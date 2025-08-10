@@ -98,7 +98,5 @@ for step in range(1, max_iters + 1):
     )
 
 
-# @torch.no_grad()
-# def infer():
 
 

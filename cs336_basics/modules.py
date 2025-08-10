@@ -1,3 +1,4 @@
+import json
 import math
 from collections.abc import Callable, Iterable
 
@@ -240,9 +241,11 @@ class Transformer(nn.Module):
         d_ff: int,
         rope_theta: float,
         dtype: torch.dtype | None = None,
-        device: torch.device | None = None,
+        device: torch.device | str | None = None,
     ):
         super().__init__()
+        if isinstance(device, str):
+            device = torch.device(device)
         # Embed token indices to a sequence of token embeddings.
         self.token_embd = Embedding(num_embeddings=vocab_size, embedding_dim=d_model, dtype=dtype, device=device)
 
@@ -264,6 +267,12 @@ class Transformer(nn.Module):
             x = l(x)  # (b, seq, d_model)
         logit = self.lm_head(self.ln_f(x))  # (b, seq, vocab)
         return logit
+
+    @classmethod
+    def from_config(cls, config_path: str, device: torch.device | str | None = None) -> "Transformer":
+        with open(config_path, "rb") as f:
+            config = json.load(f)
+        return cls(**config, device=device)
 
 
 def cross_entropy(logits: Float[Tensor, "... batch dim"], targets: Int[Tensor, "... batch"]) -> Float[Tensor, ""]:
