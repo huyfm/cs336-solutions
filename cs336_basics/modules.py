@@ -2,6 +2,7 @@ import math
 from collections.abc import Callable, Iterable
 
 import torch
+import torch.nn.functional as F
 from einops import einsum, rearrange, reduce
 from jaxtyping import Bool, Float, Int
 from torch import Tensor, nn
@@ -193,8 +194,10 @@ class CausalMHA(nn.Module):
             Q = self.rope(Q, pos_ids)
             K = self.rope(K, pos_ids)
 
-        mask = self.mask[:seq_len, :seq_len]  # type: ignore
-        attn = scaled_dot_product_attention(Q, K, V, mask)  # (b, h, seq, d_k)
+        # mask = self.mask[:seq_len, :seq_len]  # type: ignore
+        # attn = scaled_dot_product_attention(Q, K, V, mask)  # (b, h, seq, d_k)
+
+        attn = F.scaled_dot_product_attention(Q, K, V, is_causal=True)
         attn = rearrange(attn, "b h seq d_k -> b seq (h d_k)")  # (b, seq, d_model)
 
         return self.out_proj(attn)
@@ -277,7 +280,14 @@ def cross_entropy(logits: Float[Tensor, "... batch dim"], targets: Int[Tensor, "
 
 
 class AdamW(torch.optim.Optimizer):
-    def __init__(self, params: ParamsT, lr: float, betas: tuple[float, float], eps: float, weight_decay: float):
+    def __init__(
+        self,
+        params: ParamsT,
+        lr: float = 1e-3,
+        betas: tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 0,
+    ):
         defaults = {
             "lr": lr,
             "betas": betas,
@@ -344,18 +354,14 @@ def cosine_lr(t: int, lr_min: float, lr_max: float, warmup_iters: int, anneal_it
     return lr_min + 0.5 * (1 + math.cos(phi)) * (lr_max - lr_min)
 
 
-def gradient_clipping(params: Iterable[Tensor], max_l2_norm: float) -> None:
-    try:
-        device = iter(params).__next__().device
-    except StopIteration:
-        return
-
-    squared_norm = torch.tensor(0.0, dtype=torch.float32, device=device)
+def gradient_clipping(params: Iterable[Tensor], max_l2_norm: float) -> float:
+    device = next(iter(params)).device
+    sum_squared = torch.tensor(0.0, dtype=torch.float32, device=device)
     for p in params:
         if p.grad is None:
             continue
-        squared_norm += p.grad.to(torch.float32).pow(2).sum()
-    norm = squared_norm.sqrt()
+        sum_squared += p.grad.to(torch.float32).pow(2).sum()
+    norm = sum_squared.sqrt()
 
     if norm > max_l2_norm:
         scale = max_l2_norm / (norm + 1e-6)
@@ -363,3 +369,4 @@ def gradient_clipping(params: Iterable[Tensor], max_l2_norm: float) -> None:
             if p.grad is None:
                 continue
             p.grad.mul_(scale)
+    return norm.item()

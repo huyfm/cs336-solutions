@@ -5,6 +5,36 @@ import numpy as np
 import torch
 
 
+class DataLoader:
+    def __init__(self, fpath: str, B: int, T: int):
+        self.data = np.memmap(fpath, dtype=np.uint16)
+        self.B = B
+        self.T = T
+        self.cur_idx = 0
+
+    def next_batch(self) -> tuple[torch.Tensor, torch.Tensor]:
+        B, T = self.B, self.T
+        # input batch
+        x_np = self.data[self.cur_idx : self.cur_idx + B * T]
+        x = torch.from_numpy(x_np).to(dtype=torch.int64).view(B, T)
+        # target batch: input batch shift by one.
+        y_np = self.data[self.cur_idx + 1 : self.cur_idx + B * T + 1]
+        y = torch.from_numpy(y_np).to(dtype=torch.int64).view(B, T)
+
+        # advance to next batch
+        self.cur_idx += B * T
+        if self.cur_idx >= len(self.data):
+            self.cur_idx = 0
+
+        return x, y
+
+    def __len__(self):
+        return len(self.data)
+
+    def reset(self):
+        self.cur_idx = 0
+
+
 def get_batch(data: np.ndarray, B: int, T: int, device: torch.device | str) -> tuple[torch.Tensor, torch.Tensor]:
     ids = np.random.randint(len(data) - T, size=B)
     x_np = np.stack([data[i : i + T] for i in ids], axis=0)

@@ -1,78 +1,104 @@
+import os
 import time
 
-import numpy as np
 import torch
-from pydantic import BaseModel
 
-from cs336_basics.modules import AdamW, Transformer, cross_entropy
-from cs336_basics.utils import get_batch
+from cs336_basics.modules import Transformer, cosine_lr, cross_entropy
+from cs336_basics.utils import DataLoader
 
-# parser = argparse.ArgumentParser(description="CS336 Transformer training CLI")
-
-# parser.add_argument("--train_path", type=str, required=True, help="filepath to training dataset")
-# parser.add_argument("--valid_path", type=str, required=True, help="filepath to validation dataset")
-# parser.add_argument("--batch_size", type=int, required=True, help="batch size")
-# parser.add_argument("--lr_min", type=float, required=True, help="minimum learning rate")
-# parser.add_argument("--lr_max", type=float, required=True, help="maximum learning rate")
-# parser.add_argument("--num_iters", type=int, required=True, help="number of iterations")
-# parser.add_argument("--num_warmup_iters", type=int, default=10, help="number of warming up iterations") 
-# parser.add_argument("--weight_decay", type=float, default=1e-3, help="weight decay regularization factor")
-
-# args = parser.parse_args()
-
-# Hyperparameters
-# lr_min = 
-# lr_max =
-# num_warmup =
+LOG_DIR = "llm_train/logs"
 
 device = torch.device("cuda:1")
-
-class Config(BaseModel):
-    vocab_size: int = 50257
-    ctx_len: int
-    num_layers: int
-    num_heads: int
-    d_model: int
-    d_ff: int
-    rope_theta: float = 1e5
-
-
-config = Config(num_layers=4, ctx_len=256, d_model=512, num_heads=16, d_ff=1344)
-model = Transformer(**config.model_dump(), dtype=torch.float32, device=device)
-model.compile()
-
-torch.set_float32_matmul_precision('high')
-
+print("device:", device)
 
 trainpath = "data/TinyStoriesV2-GPT4-train.dat"
-validpath = "data/TinyStoriesV2-GPT4-valid.dat" 
+validpath = "data/TinyStoriesV2-GPT4-valid.dat"
 
-Xtrain = np.memmap(trainpath, dtype=np.uint16)[:1024]
-# Xval = np.memmap(valid_path, dtype=np.uint16)
+config = {
+    "vocab_size": 50257,
+    "ctx_len": 256,
+    "num_layers": 4,
+    "num_heads": 16,
+    "d_model": 512,
+    "d_ff": 1344,
+    "rope_theta": 1e5,
+}
+model = Transformer(**config, device=device)
+nparams = 0
+for m in model.parameters():
+    nparams += m.numel()
+print(f"loaded model: {nparams // 10**6}M params")
 
-B = 32
-T = 32
-num_iters = 200
-weight_decay = 1e-5
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.1)
 
-optimizer = AdamW(model.parameters(), lr=1e-3, betas=(0.95, 0.99), eps=1e-5, weight_decay=weight_decay)
+model.compile()
+torch.backends.cuda.enable_flash_sdp(True)
+torch.set_float32_matmul_precision("high")
 
+B = 64
+T = 256
+train_loader = DataLoader(trainpath, B, T)
+val_loader = DataLoader(validpath, B, T)
 
-for step in range(1, num_iters):
+lr_max = 6e-4
+lr_min = 0.1 * lr_max
+max_iters = len(train_loader) // (B * T)
+val_iters = len(val_loader) // (B * T)
+warmup_iters = 100
+print(f"1 batch = {B * T} tokens")
+print(f"train: {max_iters} iters, warmup: {warmup_iters} iters, val: {val_iters} iters")
+
+ckpt_dir = LOG_DIR
+
+for step in range(1, max_iters + 1):
+    # Checkpoint model once in a while
+    if step % 500 == 0 or step == max_iters:
+        val_loss_accum = 0.0
+        val_loader.reset()
+        model.eval()
+        for _ in range(val_iters):
+            x, y = val_loader.next_batch()
+            with torch.no_grad():
+                logits = model(x)
+                loss = cross_entropy(logits, y)
+            val_loss_accum += loss.item()
+        val_loss = val_loss_accum / val_iters
+        checkpoint = {
+            "model": model.state_dict(),
+            "step": step,
+            "val_loss": val_loss,
+        }
+        ckpt_name = f"model-step={step}-val_loss={val_loss:.4f}.pt"
+        torch.save(checkpoint, os.path.join(ckpt_dir, ckpt_name))
+
+    # Do one optimization step
+    model.train()
     t0 = time.perf_counter()
-    x, y = get_batch(Xtrain, B, T, device)
-    logits = model(x)
-    loss = cross_entropy(logits, y)
+    x, y = train_loader.next_batch()
+    x, y = x.to(device), y.to(device)
+    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        logits = model(x)
+        loss = cross_entropy(logits, y)
     optimizer.zero_grad()
     loss.backward()
 
-    # Compute cosine annealing learning rate and update parameters.
-    # lr = cosine_lr(step, lr_min, lr_max, warmup_iters, num_iters)
-    # for group in optimizer.param_groups:
-    #     group["lr"] = lr
+    lr = cosine_lr(step, lr_min, lr_max, warmup_iters, max_iters)
+    for group in optimizer.param_groups:
+        group["lr"] = lr
+
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
 
     torch.cuda.synchronize()
     dt = time.perf_counter() - t0
     tok_per_sec = x.numel() / dt
-    print(f"step: {step}, loss: {loss.item():.4f}, dt: {dt * 1000 :.2f} ms, tok/sec: {tok_per_sec:.0f}")
+    print(
+        f"step: {step} | loss: {loss.item():6.4f} | lr: {lr:.2e} | norm: {norm:.4f} | "
+        f"dt: {dt * 1000:.2f} ms | tok/sec: {tok_per_sec:.0f}"
+    )
+
+
+# @torch.no_grad()
+# def infer():
+
+
